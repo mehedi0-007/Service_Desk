@@ -1,0 +1,106 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  OPERATOR
+  SUPERVISOR
+}
+
+enum RequestStatus {
+  QUEUED
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum RequestPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum RequestCategory {
+  HARDWARE
+  SOFTWARE
+  NETWORK
+  ACCESS
+  OTHER
+}
+
+enum ProcessingStage {
+  VALIDATING
+  PROCESSING
+  FINALIZING
+}
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String   @unique @db.VarChar(254)
+  name         String   @db.VarChar(100)
+  passwordHash String   @map("password_hash")
+  role         Role
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  createdRequests  ServiceRequest[]       @relation("CreatedRequests")
+  assignedRequests ServiceRequest[]       @relation("AssignedRequests")
+  statusChanges    RequestStatusHistory[]
+
+  @@map("users")
+}
+
+model ServiceRequest {
+  id            String           @id @default(uuid()) @db.Uuid
+  referenceNo   Int              @unique @default(autoincrement()) @map("reference_no")
+  title         String           @db.VarChar(120)
+  description   String           @db.VarChar(2000)
+  category      RequestCategory
+  priority      RequestPriority  @default(MEDIUM)
+  status        RequestStatus    @default(QUEUED)
+  progress      Int              @default(0)
+  stage         ProcessingStage?
+  attempts      Int              @default(0)
+  failureReason String?          @map("failure_reason") @db.VarChar(500)
+  queueJobId    String?          @map("queue_job_id") @db.VarChar(100)
+  version       Int              @default(1)
+  createdById   String           @map("created_by_id") @db.Uuid
+  assignedToId  String?          @map("assigned_to_id") @db.Uuid
+  createdAt     DateTime         @default(now()) @map("created_at")
+  updatedAt     DateTime         @updatedAt @map("updated_at")
+  startedAt     DateTime?        @map("started_at")
+  finishedAt    DateTime?        @map("finished_at")
+
+  createdBy  User                   @relation("CreatedRequests", fields: [createdById], references: [id], onDelete: Restrict)
+  assignedTo User?                  @relation("AssignedRequests", fields: [assignedToId], references: [id], onDelete: SetNull)
+  history    RequestStatusHistory[]
+
+  @@index([status])
+  @@index([priority])
+  @@index([createdAt])
+  @@index([createdById])
+  @@index([assignedToId])
+  @@map("service_requests")
+}
+
+model RequestStatusHistory {
+  id          String         @id @default(uuid()) @db.Uuid
+  requestId   String         @map("request_id") @db.Uuid
+  fromStatus  RequestStatus? @map("from_status")
+  toStatus    RequestStatus  @map("to_status")
+  note        String?        @db.VarChar(500)
+  changedById String?        @map("changed_by_id") @db.Uuid
+  createdAt   DateTime       @default(now()) @map("created_at")
+
+  request   ServiceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  changedBy User?          @relation(fields: [changedById], references: [id], onDelete: SetNull)
+
+  @@index([requestId, createdAt])
+  @@map("request_status_history")
+}
