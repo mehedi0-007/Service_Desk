@@ -1,7 +1,10 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { appConfig } from './config/app.config';
+import { LoggerModule } from 'nestjs-pino';
+import { AppConfig, appConfig } from './config/app.config';
 import { envValidationSchema } from './config/env.validation';
+import { buildLoggerParams } from './config/logger.config';
+import { HealthModule } from './health/health.module';
 import { PrismaModule } from './prisma/prisma.module';
 
 @Module({
@@ -13,7 +16,12 @@ import { PrismaModule } from './prisma/prisma.module';
       envFilePath: process.env.NODE_ENV === 'test' ? '.env.test' : '.env',
       validationSchema: envValidationSchema,
     }),
+    LoggerModule.forRootAsync({
+      inject: [appConfig.KEY],
+      useFactory: (config: AppConfig) => buildLoggerParams(config),
+    }),
     PrismaModule,
+    HealthModule,
   ],
 })
 export class AppModule {}
