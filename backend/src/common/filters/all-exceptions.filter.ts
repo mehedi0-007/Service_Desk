@@ -69,11 +69,14 @@ export class AllExceptionsFilter implements ExceptionFilter {
     }
 
     if (exception instanceof HttpException) {
-      const statusCode = exception.getStatus();
+      const statusCode: HttpStatus = exception.getStatus();
       return {
         statusCode,
         code: CODE_BY_STATUS[statusCode] ?? ErrorCode.BAD_REQUEST,
-        message: exception.message,
+        message:
+          statusCode === HttpStatus.TOO_MANY_REQUESTS
+            ? 'Too many requests. Please try again later.'
+            : exception.message,
         details: null,
       };
     }

@@ -1,5 +1,6 @@
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { Logger } from 'nestjs-pino';
@@ -9,10 +10,14 @@ import { validationExceptionFactory } from './common/validation/validation-excep
 import { AppConfig, appConfig } from './config/app.config';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    bufferLogs: true,
+  });
   app.useLogger(app.get(Logger));
   const config = app.get<AppConfig>(appConfig.KEY);
 
+  // Behind a hosting proxy, use the client address from X-Forwarded-For for rate limiting.
+  app.set('trust proxy', 1);
   app.use(helmet());
   app.enableCors({ origin: config.corsOrigins, credentials: false });
   app.setGlobalPrefix('api/v1');
