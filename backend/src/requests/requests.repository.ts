@@ -105,7 +105,14 @@ export class RequestsRepository {
         where,
         include: REQUEST_INCLUDE,
         // Postgres sorts enums in declaration order, so priority sorts LOW to URGENT.
-        orderBy: [{ [sort.sortBy]: sort.sortOrder }, { createdAt: 'desc' }],
+        // The unique reference number breaks ties, so pages never repeat or skip rows.
+        orderBy:
+          sort.sortBy === 'referenceNo'
+            ? { referenceNo: sort.sortOrder }
+            : [
+                { [sort.sortBy]: sort.sortOrder },
+                { referenceNo: sort.sortOrder },
+              ],
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
