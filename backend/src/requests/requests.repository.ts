@@ -182,6 +182,14 @@ export class RequestsRepository {
     return count;
   }
 
+  findByStatus(statuses: RequestStatus[]): Promise<RequestRow[]> {
+    return this.prisma.serviceRequest.findMany({
+      where: { status: { in: statuses } },
+      include: REQUEST_INCLUDE,
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
   findHistory(requestId: string): Promise<HistoryRow[]> {
     return this.prisma.requestStatusHistory.findMany({
       where: { requestId },
