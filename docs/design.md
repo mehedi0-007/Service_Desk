@@ -362,7 +362,7 @@ Sending the same body again (version 3 is now outdated):
 |---|---|---|
 | `request.created` | `{ request: RequestDto }` | After a request is created |
 | `request.updated` | `{ request: RequestDto }` | Any status, priority or assignment change (by worker or user) |
-| `request.progress` | `{ id, number, status, progress, stage, updatedAt }` | Every worker progress tick |
+| `request.progress` | `{ id, referenceNo, status, progress, stage, updatedAt }` | Every worker progress tick |
 
 ### 6.1 Request Processing Flow
 

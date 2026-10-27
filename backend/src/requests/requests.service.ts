@@ -16,6 +16,7 @@ import { CreateRequestDto } from './dto/create-request.dto';
 import { ListRequestsQuery, UNASSIGNED } from './dto/list-requests.query';
 import { HistoryEntryDto, RequestDto } from './dto/request.response';
 import { UpdateRequestDto } from './dto/update-request.dto';
+import { RequestEventsPublisher } from './request-events';
 import { RequestRow, toHistoryDto, toRequestDto } from './request.mapper';
 import { assertTransition } from './request-state-machine';
 import { RequestListFilter, RequestsRepository } from './requests.repository';
@@ -35,6 +36,7 @@ export class RequestsService {
     private readonly repository: RequestsRepository,
     private readonly queue: RequestQueueService,
     private readonly users: UsersService,
+    private readonly events: RequestEventsPublisher,
   ) {}
 
   async create(
@@ -42,8 +44,9 @@ export class RequestsService {
     user: AuthenticatedUser,
   ): Promise<RequestDto> {
     const created = await this.repository.create(dto, user.id);
-    const request = await this.enqueueAfterCommit(created);
-    return toRequestDto(request);
+    const request = toRequestDto(await this.enqueueAfterCommit(created));
+    this.events.created(request);
+    return request;
   }
 
   async list(
@@ -105,7 +108,9 @@ export class RequestsService {
     if (updated === 0) {
       throw versionConflict();
     }
-    return toRequestDto(await this.findOrFail(id));
+    const request = toRequestDto(await this.findOrFail(id));
+    this.events.updated(request);
+    return request;
   }
 
   async changeStatus(
@@ -149,7 +154,9 @@ export class RequestsService {
     if (dto.status === RequestStatus.QUEUED) {
       request = await this.enqueueAfterCommit(request);
     }
-    return toRequestDto(request);
+    const result = toRequestDto(request);
+    this.events.updated(result);
+    return result;
   }
 
   private statusChangeData(

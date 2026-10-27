@@ -40,6 +40,12 @@ export type RequestSort = {
   sortOrder: Prisma.SortOrder;
 };
 
+export type RequestCounts = {
+  byStatus: { status: RequestStatus; count: number }[];
+  byPriority: { priority: RequestPriority; count: number }[];
+  avgProcessingSeconds: number | null;
+};
+
 export type TransitionInput = {
   id: string;
   from: RequestStatus;
@@ -164,6 +170,35 @@ export class RequestsRepository {
       include: HISTORY_INCLUDE,
       orderBy: { createdAt: 'asc' },
     });
+  }
+
+  async stats(): Promise<RequestCounts> {
+    const [byStatus, byPriority, [average]] = await Promise.all([
+      this.prisma.serviceRequest.groupBy({
+        by: ['status'],
+        _count: { _all: true },
+      }),
+      this.prisma.serviceRequest.groupBy({
+        by: ['priority'],
+        _count: { _all: true },
+      }),
+      this.prisma.$queryRaw<{ seconds: number | null }[]>`
+        SELECT EXTRACT(EPOCH FROM AVG(finished_at - started_at))::float8 AS seconds
+        FROM service_requests
+        WHERE status = 'COMPLETED' AND started_at IS NOT NULL AND finished_at IS NOT NULL`,
+    ]);
+    return {
+      byStatus: byStatus.map((row) => ({
+        status: row.status,
+        count: row._count._all,
+      })),
+      byPriority: byPriority.map((row) => ({
+        priority: row.priority,
+        count: row._count._all,
+      })),
+      avgProcessingSeconds:
+        average.seconds === null ? null : Math.round(average.seconds),
+    };
   }
 
   private buildWhere(

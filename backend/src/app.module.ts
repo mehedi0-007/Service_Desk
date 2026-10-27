@@ -1,6 +1,9 @@
+import { createKeyvNonBlocking } from '@keyv/redis';
+import { CacheModule } from '@nestjs/cache-manager';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { LoggerModule } from 'nestjs-pino';
 import { AuthModule } from './auth/auth.module';
@@ -27,6 +30,15 @@ import { RequestsModule } from './requests/requests.module';
       useFactory: (config: AppConfig) => buildLoggerParams(config),
     }),
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
+    EventEmitterModule.forRoot(),
+    // Non-blocking store: if Redis is down, cache reads miss instead of failing the request.
+    CacheModule.registerAsync({
+      isGlobal: true,
+      inject: [appConfig.KEY],
+      useFactory: (config: AppConfig) => ({
+        stores: [createKeyvNonBlocking(config.redisUrl)],
+      }),
+    }),
     PrismaModule,
     HealthModule,
     AuthModule,
