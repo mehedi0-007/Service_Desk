@@ -15,6 +15,8 @@ import {
 } from "@/components/ui/table";
 import { CATEGORY_LABELS, formatDateTime, formatRef } from "@/lib/format";
 import type { RequestDto } from "@/lib/types";
+import { cn } from "@/lib/utils";
+import { useRealtimeStore } from "@/stores/realtime-store";
 import { PriorityBadge } from "./priority-badge";
 import { RequestProgress } from "./request-progress";
 import { StatusBadge } from "./status-badge";
@@ -28,6 +30,10 @@ export function RequestList({
   showPeople?: boolean;
 }) {
   const router = useRouter();
+  // Rows that just received a live update are briefly highlighted.
+  const flashedIds = useRealtimeStore((s) => s.flashedIds);
+  const flashClass = (id: string) =>
+    cn("transition-colors duration-1000", flashedIds.includes(id) && "bg-blue-50");
 
   return (
     <>
@@ -51,7 +57,7 @@ export function RequestList({
             {requests.map((request) => (
               <TableRow
                 key={request.id}
-                className="cursor-pointer"
+                className={cn("cursor-pointer", flashClass(request.id))}
                 onClick={() => router.push(`/requests/${request.id}`)}
               >
                 <TableCell className="font-mono text-xs">
@@ -95,7 +101,10 @@ export function RequestList({
           <li key={request.id}>
             <Link
               href={`/requests/${request.id}`}
-              className="block space-y-3 rounded-xl border bg-background p-4 outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+              className={cn(
+                "block space-y-3 rounded-xl border bg-background p-4 outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+                flashClass(request.id),
+              )}
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">

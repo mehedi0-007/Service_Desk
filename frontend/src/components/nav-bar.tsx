@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { ROLE_LABELS } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/stores/auth-store";
+import { ConnectionIndicator } from "./connection-indicator";
 
 export function NavBar() {
   const pathname = usePathname();
@@ -56,6 +57,7 @@ export function NavBar() {
           </nav>
         </div>
         <div className="flex flex-wrap items-center gap-3">
+          <ConnectionIndicator />
           {user && (
             <span className="flex items-center gap-2 text-sm">
               {user.name}

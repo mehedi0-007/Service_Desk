@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { NavBar } from "@/components/nav-bar";
+import { useRealtime } from "@/hooks/use-realtime";
 import { useAuthStore } from "@/stores/auth-store";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -13,6 +14,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (hasHydrated && !token) router.replace("/login");
   }, [hasHydrated, token, router]);
+
+  // One WebSocket connection for the whole signed-in app.
+  useRealtime();
 
   if (!hasHydrated || !token) return null;
 
