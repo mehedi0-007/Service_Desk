@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import {
+  ProcessingStage,
   Prisma,
   RequestCategory,
   RequestPriority,
@@ -162,6 +163,23 @@ export class RequestsRepository {
       where: { id },
       data: { queueJobId },
     });
+  }
+
+  /**
+   * Progress ticks write only while the request is still IN_PROGRESS, so a user's cancel is
+   * never overwritten. The version is not bumped: otherwise users could never win a race
+   * against a running job. Returns 0 when the request is no longer in progress.
+   */
+  async updateProgress(
+    id: string,
+    progress: number,
+    stage: ProcessingStage,
+  ): Promise<number> {
+    const { count } = await this.prisma.serviceRequest.updateMany({
+      where: { id, status: RequestStatus.IN_PROGRESS },
+      data: { progress, stage },
+    });
+    return count;
   }
 
   findHistory(requestId: string): Promise<HistoryRow[]> {
