@@ -20,7 +20,13 @@ async function bootstrap() {
   // Behind a hosting proxy, use the client address from X-Forwarded-For for rate limiting.
   app.set('trust proxy', 1);
   app.use(helmet());
-  app.enableCors({ origin: config.corsOrigins, credentials: false });
+  // The frontend is on another origin and sends a Bearer token, so every call needs a CORS
+  // preflight; caching it for 10 minutes saves a round trip on nearly every request.
+  app.enableCors({
+    origin: config.corsOrigins,
+    credentials: false,
+    maxAge: 600,
+  });
   app.useWebSocketAdapter(new SocketIoAdapter(app, config.corsOrigins));
   app.setGlobalPrefix('api/v1');
   app.useGlobalPipes(
