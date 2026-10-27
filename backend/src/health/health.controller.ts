@@ -9,6 +9,7 @@ import {
 import { SkipThrottle } from '@nestjs/throttler';
 import { Public } from '../common/decorators/public.decorator';
 import { PrismaService } from '../prisma/prisma.service';
+import { RedisHealthIndicator } from './redis.health';
 
 @ApiTags('health')
 @Public()
@@ -21,8 +22,12 @@ export class HealthController {
     private readonly health: HealthCheckService,
     prismaHealth: PrismaHealthIndicator,
     prisma: PrismaService,
+    redisHealth: RedisHealthIndicator,
   ) {
-    this.checks = [() => prismaHealth.pingCheck('database', prisma)];
+    this.checks = [
+      () => prismaHealth.pingCheck('database', prisma),
+      () => redisHealth.pingCheck('redis'),
+    ];
   }
 
   @Get()

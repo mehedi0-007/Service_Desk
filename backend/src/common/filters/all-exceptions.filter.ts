@@ -26,6 +26,7 @@ const CODE_BY_STATUS: Partial<Record<number, ErrorCode>> = {
   [HttpStatus.NOT_FOUND]: ErrorCode.NOT_FOUND,
   [HttpStatus.CONFLICT]: ErrorCode.CONFLICT,
   [HttpStatus.TOO_MANY_REQUESTS]: ErrorCode.RATE_LIMITED,
+  [HttpStatus.SERVICE_UNAVAILABLE]: ErrorCode.SERVICE_UNAVAILABLE,
 };
 
 @Catch()
@@ -70,9 +71,22 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     if (exception instanceof HttpException) {
       const statusCode: HttpStatus = exception.getStatus();
+      if (statusCode === HttpStatus.SERVICE_UNAVAILABLE) {
+        // The health check reports which dependency is down in its response body.
+        return {
+          statusCode,
+          code: ErrorCode.SERVICE_UNAVAILABLE,
+          message: 'One or more dependencies are unavailable',
+          details: exception.getResponse(),
+        };
+      }
       return {
         statusCode,
-        code: CODE_BY_STATUS[statusCode] ?? ErrorCode.BAD_REQUEST,
+        code:
+          CODE_BY_STATUS[statusCode] ??
+          (Number(statusCode) >= 500
+            ? ErrorCode.INTERNAL_ERROR
+            : ErrorCode.BAD_REQUEST),
         message:
           statusCode === HttpStatus.TOO_MANY_REQUESTS
             ? 'Too many requests. Please try again later.'

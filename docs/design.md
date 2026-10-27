@@ -236,7 +236,7 @@ erDiagram
 }
 ```
 
-Error codes: `VALIDATION_ERROR` (400, `details` lists `{ field, messages[] }`), `BAD_REQUEST` (400), `UNAUTHORIZED` (401), `INVALID_CREDENTIALS` (401), `FORBIDDEN` (403), `NOT_FOUND` (404), `INVALID_TRANSITION` (409), `VERSION_CONFLICT` (409), `CONFLICT` (409), `RATE_LIMITED` (429), `INTERNAL_ERROR` (500 — never exposes internal details).
+Error codes: `VALIDATION_ERROR` (400, `details` lists `{ field, messages[] }`), `BAD_REQUEST` (400), `UNAUTHORIZED` (401), `INVALID_CREDENTIALS` (401), `FORBIDDEN` (403), `NOT_FOUND` (404), `INVALID_TRANSITION` (409), `VERSION_CONFLICT` (409), `CONFLICT` (409), `RATE_LIMITED` (429), `SERVICE_UNAVAILABLE` (503, health check only; `details` names the failing dependency), `INTERNAL_ERROR` (500 — never exposes internal details).
 
 ### 5.2 Endpoints
 
