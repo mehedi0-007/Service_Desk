@@ -15,6 +15,7 @@ import { buildLoggerParams } from './config/logger.config';
 import { HealthModule } from './health/health.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProcessingModule } from './processing/processing.module';
+import { RealtimeModule } from './realtime/realtime.module';
 import { RequestsModule } from './requests/requests.module';
 
 @Module({
@@ -45,6 +46,7 @@ import { RequestsModule } from './requests/requests.module';
     AuthModule,
     RequestsModule,
     ProcessingModule,
+    RealtimeModule,
   ],
   // Guard order matters: rate limit, then authenticate, then check roles.
   providers: [

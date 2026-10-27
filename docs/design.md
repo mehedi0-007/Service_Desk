@@ -351,7 +351,7 @@ Sending the same body again (version 3 is now outdated):
 
 | Aspect | Design |
 |---|---|
-| Library / namespace | Socket.IO, namespace `/realtime` on the API host; same CORS allow-list as REST |
+| Library / namespace | Socket.IO, namespace `/realtime` on the API host; same origin allow-list as REST, also checked during the handshake because browsers do not apply CORS to WebSocket upgrades |
 | Authentication | Client connects with `auth: { token: '<JWT>' }`; the server verifies it during the handshake. Invalid or missing token → server emits `error { code: 'UNAUTHORIZED' }` and disconnects |
 | Rooms | Every socket joins `user:{userId}`; supervisors also join `role:SUPERVISOR` |
 | Routing rule | Each request event goes to `role:SUPERVISOR` + `user:{createdById}` (+ `user:{assignedToId}` if assigned) in a single emit (Socket.IO de-duplicates sockets in several rooms) |
