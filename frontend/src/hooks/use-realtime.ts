@@ -8,7 +8,7 @@ import { formatRef } from "@/lib/format";
 import type { Paginated, RequestDto, RequestProgressEvent } from "@/lib/types";
 import { useAuthStore } from "@/stores/auth-store";
 import { useRealtimeStore } from "@/stores/realtime-store";
-import { queryKeys } from "./use-requests";
+import { queryKeys, storeRequest } from "./use-requests";
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "http://localhost:3001";
 
@@ -36,8 +36,8 @@ export function useRealtime() {
     if (!token || !user) return;
     const { setStatus, pushEvent, flash, reset } = useRealtimeStore.getState();
     const supervisor = user.role === "SUPERVISOR";
-    // Last status seen per request, so an owner toast fires once per transition.
-    const lastStatus = new Map<string, RequestDto["status"]>();
+    // Requests already announced, so a repeated event never toasts twice.
+    const announced = new Set<string>();
 
     const refreshLists = debounce(
       () => void queryClient.invalidateQueries({ queryKey: queryKeys.lists }),
@@ -71,7 +71,7 @@ export function useRealtime() {
     });
 
     const onRequest = (kind: "created" | "updated") => ({ request }: { request: RequestDto }) => {
-      queryClient.setQueryData(queryKeys.detail(request.id), request);
+      storeRequest(queryClient, request);
       void queryClient.invalidateQueries({ queryKey: queryKeys.history(request.id) });
       refreshLists();
       if (supervisor) refreshStats();
@@ -88,9 +88,14 @@ export function useRealtime() {
         at: request.updatedAt,
       });
 
-      const previous = lastStatus.get(request.id);
-      lastStatus.set(request.id, request.status);
-      if (!supervisor && request.createdBy.id === user.id && previous !== request.status) {
+      // The finishing transition sets finishedAt and updatedAt together; a later priority or
+      // assignment change only moves updatedAt, so it does not toast again.
+      const justFinished =
+        request.finishedAt !== null &&
+        Date.parse(request.updatedAt) - Date.parse(request.finishedAt) < 1000;
+      const key = `${request.id}:${request.finishedAt}`;
+      if (!supervisor && request.createdBy.id === user.id && justFinished && !announced.has(key)) {
+        announced.add(key);
         const ref = formatRef(request.referenceNo);
         if (request.status === "COMPLETED") toast.success(`${ref} completed`);
         if (request.status === "FAILED") {

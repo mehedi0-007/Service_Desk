@@ -71,8 +71,19 @@ export function useSupervisors(enabled = true) {
   });
 }
 
+/**
+ * Stores a request in the detail cache unless the cache already holds a newer version.
+ * HTTP responses and WebSocket events race: the worker can claim a retried request and push
+ * the IN_PROGRESS event before the retry's own (older) response arrives.
+ */
+export function storeRequest(queryClient: QueryClient, request: RequestDto) {
+  queryClient.setQueryData<RequestDto>(queryKeys.detail(request.id), (cached) =>
+    cached && cached.version > request.version ? cached : request,
+  );
+}
+
 function applyRequest(queryClient: QueryClient, request: RequestDto) {
-  queryClient.setQueryData(queryKeys.detail(request.id), request);
+  storeRequest(queryClient, request);
   void queryClient.invalidateQueries({ queryKey: queryKeys.lists });
   void queryClient.invalidateQueries({ queryKey: queryKeys.history(request.id) });
 }
