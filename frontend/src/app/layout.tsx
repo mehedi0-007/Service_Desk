@@ -5,7 +5,7 @@ import { Providers } from "./providers";
 import "./globals.css";
 
 const geistSans = Geist({
-  variable: "--font-sans",
+  variable: "--font-geist-sans",
   subsets: ["latin"],
 });
 
@@ -25,10 +25,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} bg-neutral-50 antialiased`}
-      >
+    // The font variables go on <html>, where the theme applies font-sans.
+    <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`}>
+      <body className="bg-neutral-50 antialiased">
         <Providers>{children}</Providers>
         <Toaster richColors position="top-right" />
       </body>

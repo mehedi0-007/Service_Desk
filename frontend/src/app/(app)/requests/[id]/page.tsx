@@ -94,7 +94,7 @@ export default function RequestDetailPage() {
 
           <p className="text-sm break-words whitespace-pre-wrap">{request.description}</p>
 
-          <dl className="grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-3">
+          <dl className="grid grid-cols-2 gap-4 text-sm lg:grid-cols-3">
             <Detail label="Category" value={CATEGORY_LABELS[request.category]} />
             <Detail label="Created by" value={request.createdBy.name} />
             <Detail label="Created" value={formatDateTime(request.createdAt)} />
