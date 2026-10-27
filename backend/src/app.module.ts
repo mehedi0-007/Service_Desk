@@ -11,6 +11,7 @@ import { envValidationSchema } from './config/env.validation';
 import { buildLoggerParams } from './config/logger.config';
 import { HealthModule } from './health/health.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { RequestsModule } from './requests/requests.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { PrismaModule } from './prisma/prisma.module';
     PrismaModule,
     HealthModule,
     AuthModule,
+    RequestsModule,
   ],
   // Guard order matters: rate limit, then authenticate, then check roles.
   providers: [
