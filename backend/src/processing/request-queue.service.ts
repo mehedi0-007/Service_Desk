@@ -26,6 +26,7 @@ export class RequestQueueService {
   ) {}
 
   async enqueue(requestId: string, version: number): Promise<string> {
+    await this.assertConnected();
     const jobId = jobIdFor(requestId, version);
     // BullMQ ignores a new job whose id is still stored, so a failed one is removed first
     // (completed jobs are removed automatically).
@@ -57,6 +58,7 @@ export class RequestQueueService {
   }
 
   async getCounts(): Promise<{ waiting: number; active: number }> {
+    await this.assertConnected();
     const counts = await this.queue.getJobCounts('waiting', 'active');
     return { waiting: counts.waiting ?? 0, active: counts.active ?? 0 };
   }

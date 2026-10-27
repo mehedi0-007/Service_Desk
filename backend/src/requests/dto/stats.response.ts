@@ -2,11 +2,21 @@ import { ApiProperty } from '@nestjs/swagger';
 import { RequestPriority, RequestStatus } from '@prisma/client';
 
 export class QueueStatsDto {
-  @ApiProperty({ description: 'Jobs waiting for a free worker slot' })
-  waiting!: number;
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description:
+      'Jobs waiting for a free worker slot; null while the queue is unreachable',
+  })
+  waiting!: number | null;
 
-  @ApiProperty({ description: 'Jobs being processed right now' })
-  active!: number;
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description:
+      'Jobs being processed right now; null while the queue is unreachable',
+  })
+  active!: number | null;
 
   @ApiProperty({ description: 'Maximum jobs processed at the same time' })
   workerConcurrency!: number;

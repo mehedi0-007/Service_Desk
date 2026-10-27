@@ -33,11 +33,14 @@ export class StatsService {
       return cached;
     }
     const stats = await this.build();
-    await this.cache.set(
-      STATS_KEY,
-      stats,
-      this.config.statsCacheTtlSeconds * 1000,
-    );
+    // Partial results (queue unreachable) are not cached, so recovery shows up immediately.
+    if (stats.queue.waiting !== null) {
+      await this.cache.set(
+        STATS_KEY,
+        stats,
+        this.config.statsCacheTtlSeconds * 1000,
+      );
+    }
     return stats;
   }
 
@@ -55,7 +58,7 @@ export class StatsService {
   private async build(): Promise<StatsDto> {
     const [counts, queue] = await Promise.all([
       this.repository.stats(),
-      this.queue.getCounts(),
+      this.queueCounts(),
     ]);
 
     const byStatus = zeroCounts(Object.values(RequestStatus));
@@ -75,5 +78,18 @@ export class StatsService {
       queue: { ...queue, workerConcurrency: this.config.worker.concurrency },
       generatedAt: new Date().toISOString(),
     };
+  }
+
+  // Request counts come from the database, so the dashboard keeps working while Redis is down.
+  private async queueCounts(): Promise<{
+    waiting: number | null;
+    active: number | null;
+  }> {
+    try {
+      return await this.queue.getCounts();
+    } catch (error) {
+      this.logger.warn(`Queue counts unavailable: ${String(error)}`);
+      return { waiting: null, active: null };
+    }
   }
 }
