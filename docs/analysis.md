@@ -35,7 +35,7 @@ while long-running processing happens in the background without slowing the appl
 1. Requests are processed automatically on submission; the "long-running operation" is a simulated 3-stage job (6–15 s total by default) with a configurable random failure rate.
 2. Two roles only (Operator, Supervisor); users are seeded — no self-registration or password reset.
 3. Assignment is to supervisors (acting as the responsible owner); there is no separate technician role.
-4. Failed jobs are not retried automatically; retry is a supervisor decision (keeps the audit trail meaningful).
+4. Failed processing is not retried automatically; retry is a supervisor decision (keeps the audit trail meaningful). Only infrastructure errors that stop a job before it starts processing (for example, a brief database outage) are retried by the queue, up to 3 attempts with backoff.
 5. A request in progress can be cancelled; the worker stops at its next progress tick (≤ ~1.25 s).
 6. JWT access tokens (8 h), no refresh tokens — acceptable for an internal tool and this scope.
 7. Single API instance on the free cloud tier; the design documents how to scale horizontally.

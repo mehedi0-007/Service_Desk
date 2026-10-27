@@ -15,9 +15,11 @@ import { RequestQueueService } from './request-queue.service';
     }),
     BullModule.registerQueue({
       name: REQUEST_QUEUE,
-      // Retrying is a supervisor decision, so failed jobs are never retried automatically.
+      // Failed processing is recorded on the request and retried by a supervisor. BullMQ only
+      // retries infrastructure errors that happen before the job claims its request.
       defaultJobOptions: {
-        attempts: 1,
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 1000 },
         removeOnComplete: true,
         removeOnFail: 100,
       },

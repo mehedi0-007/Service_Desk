@@ -76,36 +76,39 @@ export class RequestProcessor
       return;
     }
 
-    const request = await this.publishUpdated(requestId);
-    const ref = formatRef(request.referenceNo);
-    this.logger.log(`${ref} claimed by job ${job.id}`);
-
+    // From here on the request is IN_PROGRESS: every error must end in a final status,
+    // otherwise the request would stay in progress until the next restart.
+    let label = requestId;
     try {
+      const request = await this.publishUpdated(requestId);
+      label = formatRef(request.referenceNo);
+      this.logger.log(`${label} claimed by job ${job.id}`);
+
       const outcome = await this.runStages(request);
       if (outcome === 'cancelled') {
-        this.logger.log(`${ref} stopped: cancelled`);
+        this.logger.log(`${label} stopped: cancelled`);
         return;
       }
       if (outcome === 'failed') {
-        await this.finish(request, startedAt, RequestStatus.FAILED, {
+        await this.finish(requestId, label, startedAt, RequestStatus.FAILED, {
           failureReason: 'Simulated processing error',
         });
         return;
       }
-      await this.finish(request, startedAt, RequestStatus.COMPLETED, {
+      await this.finish(requestId, label, startedAt, RequestStatus.COMPLETED, {
         progress: 100,
         stage: null,
       });
     } catch (error) {
-      // The job itself never fails in BullMQ: the request row records the outcome.
+      // The job itself does not fail in BullMQ: the request row records the outcome.
       this.logger.error(
-        `${ref} failed unexpectedly`,
+        `${label} failed unexpectedly`,
         error instanceof Error ? error.stack : String(error),
       );
-      await this.finish(request, startedAt, RequestStatus.FAILED, {
+      await this.finish(requestId, label, startedAt, RequestStatus.FAILED, {
         failureReason: 'Unexpected processing error',
       }).catch((finishError: unknown) =>
-        this.logger.error(`${ref} could not be marked failed`, finishError),
+        this.logger.error(`${label} could not be marked failed`, finishError),
       );
     }
   }
@@ -155,14 +158,14 @@ export class RequestProcessor
   }
 
   private async finish(
-    request: RequestDto,
+    id: string,
+    label: string,
     startedAt: number,
     to: RequestStatus,
     data: Prisma.ServiceRequestUpdateManyMutationInput,
   ): Promise<void> {
-    const ref = formatRef(request.referenceNo);
     const finished = await this.repository.transition({
-      id: request.id,
+      id,
       from: RequestStatus.IN_PROGRESS,
       to,
       actorId: null,
@@ -174,11 +177,11 @@ export class RequestProcessor
     });
     if (finished === 0) {
       // Cancelled between the last tick and now: the user's cancel wins.
-      this.logger.log(`${ref} stopped: cancelled`);
+      this.logger.log(`${label} stopped: cancelled`);
       return;
     }
-    await this.publishUpdated(request.id);
-    this.logger.log(`${ref} ${to} in ${Date.now() - startedAt} ms`);
+    await this.publishUpdated(id);
+    this.logger.log(`${label} ${to} in ${Date.now() - startedAt} ms`);
   }
 
   private async publishUpdated(id: string): Promise<RequestDto> {

@@ -9,7 +9,8 @@ import { RequestQueueService } from './request-queue.service';
  * Brings the queue back in line with the database after a restart or crash:
  * - IN_PROGRESS requests were interrupted mid-run (this deployment runs a single instance),
  *   so they go back to QUEUED and are processed again from the start.
- * - QUEUED requests whose job is missing (enqueue failed, or Redis lost data) are re-enqueued.
+ * - QUEUED requests without a pending job are re-enqueued: enqueue failed, Redis lost data,
+ *   or the job failed before it could claim the request (for example, the database was down).
  * Safe while the worker is already polling: claiming a request is atomic, and enqueueing
  * reuses the same job id for the same request version.
  */
@@ -70,10 +71,10 @@ export class RecoveryService implements OnApplicationBootstrap {
     const queued = await this.repository.findByStatus([RequestStatus.QUEUED]);
     let count = 0;
     for (const request of queued) {
-      const hasJob =
+      const pending =
         request.queueJobId !== null &&
-        (await this.queue.exists(request.queueJobId));
-      if (!hasJob) {
+        (await this.queue.isPending(request.queueJobId));
+      if (!pending) {
         await this.enqueue(request.id, request.version);
         count++;
       }
