@@ -94,7 +94,9 @@ export function RequestFilters({
   // Debounce typing so every keystroke doesn't hit the API.
   useEffect(() => {
     if (search === rawQ) return;
-    const timer = setTimeout(() => update({ q: search.trim() || undefined }), 400);
+    // Keep the raw text (trailing spaces included) so the box doesn't change while typing;
+    // the API query is trimmed.
+    const timer = setTimeout(() => update({ q: search || undefined }), 400);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only react to typing
   }, [search]);
@@ -134,12 +136,14 @@ export function RequestFilters({
         </div>
         <FilterSelect
           label="Priority"
+          allLabel="All priorities"
           value={query.priority?.[0]}
           options={REQUEST_PRIORITIES.map((p) => ({ value: p, label: PRIORITY_LABELS[p] }))}
           onChange={(priority) => update({ priority })}
         />
         <FilterSelect
           label="Category"
+          allLabel="All categories"
           value={query.category}
           options={REQUEST_CATEGORIES.map((c) => ({ value: c, label: CATEGORY_LABELS[c] }))}
           onChange={(category) => update({ category })}
@@ -189,11 +193,13 @@ export function RequestFilters({
 
 function FilterSelect<T extends string>({
   label,
+  allLabel,
   value,
   options,
   onChange,
 }: {
   label: string;
+  allLabel: string;
   value: T | undefined;
   options: { value: T; label: string }[];
   onChange: (value: T | undefined) => void;
@@ -207,7 +213,7 @@ function FilterSelect<T extends string>({
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        <SelectItem value={ALL}>All {label.toLowerCase()}</SelectItem>
+        <SelectItem value={ALL}>{allLabel}</SelectItem>
         {options.map((option) => (
           <SelectItem key={option.value} value={option.value}>
             {option.label}
