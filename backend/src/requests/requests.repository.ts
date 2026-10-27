@@ -100,7 +100,9 @@ export class RequestsRepository {
     pageSize: number,
   ): Promise<[RequestRow[], number]> {
     const where = this.buildWhere(filter);
-    return this.prisma.$transaction([
+    // Page and count run in parallel on two connections. A transaction would add BEGIN/COMMIT
+    // round trips and run them one after the other, for a count that is only a page hint anyway.
+    return Promise.all([
       this.prisma.serviceRequest.findMany({
         where,
         include: REQUEST_INCLUDE,
