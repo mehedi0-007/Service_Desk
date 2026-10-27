@@ -10,7 +10,8 @@ export function redisConnectionFromUrl(redisUrl: string): ConnectionOptions {
     password: url.password ? decodeURIComponent(url.password) : undefined,
     db: url.pathname.length > 1 ? Number(url.pathname.slice(1)) : 0,
     tls: url.protocol === 'rediss:' ? {} : undefined,
-    // Required by BullMQ for blocking connections used by workers.
-    maxRetriesPerRequest: null,
+    // API-side queue calls fail fast while Redis is down; BullMQ switches worker
+    // (blocking) connections to unlimited retries on its own.
+    maxRetriesPerRequest: 2,
   };
 }
