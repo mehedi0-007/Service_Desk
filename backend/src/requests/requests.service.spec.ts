@@ -9,6 +9,7 @@ import { AppException, ErrorCode } from '../common/errors/app-error';
 import type { AuthenticatedUser } from '../common/types/authenticated-user';
 import { RequestQueueService } from '../processing/request-queue.service';
 import { UsersService } from '../users/users.service';
+import { RequestDto } from './dto/request.response';
 import { RequestEventsPublisher } from './request-events';
 import { RequestRow } from './request.mapper';
 import { RequestsRepository } from './requests.repository';
@@ -113,7 +114,9 @@ describe('RequestsService', () => {
     };
     users = { assertSupervisor: jest.fn().mockResolvedValue(undefined) };
     events = {
-      created: jest.fn(() => calls.push('created')),
+      created: jest.fn<void, [RequestDto]>(() => {
+        calls.push('created');
+      }),
       updated: jest.fn(),
     };
     service = new RequestsService(

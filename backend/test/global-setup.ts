@@ -35,8 +35,11 @@ export default async function globalSetup(): Promise<void> {
     connection: redisConnectionFromUrl(REDIS_URL!),
   });
   try {
-    // Also clears the cached statistics kept in the same Redis database.
-    const client = (await queue.client) as { flushdb(): Promise<unknown> };
+    // Also clears the cached statistics kept in the same Redis database. BullMQ types its client
+    // narrowly; at runtime it is an ioredis instance.
+    const client = (await queue.client) as unknown as {
+      flushdb(): Promise<unknown>;
+    };
     await client.flushdb();
   } finally {
     await queue.close();
