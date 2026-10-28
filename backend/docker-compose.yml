@@ -32,6 +32,28 @@ services:
       timeout: 3s
       retries: 10
 
+  # The API in its production image. Only started with `docker compose --profile app up`;
+  # plain `docker compose up` runs just Postgres and Redis for local development.
+  api:
+    build: .
+    profiles: ["app"]
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DATABASE_URL: postgresql://servicedesk:servicedesk@postgres:5432/servicedesk?schema=public
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: local-docker-secret-change-me-0123456789abcdef
+      CORS_ORIGIN: http://localhost:3000
+      SEED_ON_START: "true"
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   pgdata:
   redisdata:
