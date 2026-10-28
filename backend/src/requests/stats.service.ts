@@ -19,6 +19,11 @@ const zeroCounts = <K extends string>(keys: K[]): Record<K, number> =>
 @Injectable()
 export class StatsService {
   private readonly logger = new Logger(StatsService.name);
+  /**
+   * Bumped on every invalidation. A build that started before a change must not write its
+   * (older) numbers back into the cache after the change deleted the key.
+   */
+  private generation = 0;
 
   constructor(
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
@@ -28,13 +33,15 @@ export class StatsService {
   ) {}
 
   async getStats(): Promise<StatsDto> {
+    // Captured before any await, so a change during the cache read also counts.
+    const generation = this.generation;
     const cached = await this.cache.get<StatsDto>(STATS_KEY);
     if (cached) {
       return cached;
     }
     const stats = await this.build();
     // Partial results (queue unreachable) are not cached, so recovery shows up immediately.
-    if (stats.queue.waiting !== null) {
+    if (stats.queue.waiting !== null && generation === this.generation) {
       await this.cache.set(
         STATS_KEY,
         stats,
@@ -48,6 +55,7 @@ export class StatsService {
   @OnEvent(RequestEvents.Created)
   @OnEvent(RequestEvents.Updated)
   async invalidate(): Promise<void> {
+    this.generation++;
     try {
       await this.cache.del(STATS_KEY);
     } catch (error) {
