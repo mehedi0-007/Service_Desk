@@ -1,4 +1,4 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Inject, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { Prisma, ProcessingStage, RequestStatus } from '@prisma/client';
 import { Job } from 'bullmq';
@@ -51,6 +51,16 @@ export class RequestProcessor
     this.logger.log(
       `Worker started with concurrency ${this.config.worker.concurrency}`,
     );
+  }
+
+  /**
+   * The worker is an EventEmitter: an 'error' event without a listener is thrown and would crash
+   * the process (for example on a Redis hiccup, or a job removed while it runs). Log it instead;
+   * the database stays the source of truth and startup recovery picks up anything left behind.
+   */
+  @OnWorkerEvent('error')
+  onWorkerError(error: Error): void {
+    this.logger.error(`Worker error: ${error.message}`);
   }
 
   async process(job: Job<ProcessRequestJobData>): Promise<void> {
