@@ -22,7 +22,8 @@ export default function RequestsPage() {
 function Requests() {
   const user = useAuthStore((s) => s.user);
   const filters = useRequestFilters();
-  const { data, isPending, isError, error, refetch } = useRequestList(filters.query);
+  const { data, isPending, isError, error, refetch, isPlaceholderData } =
+    useRequestList(filters.query);
   const isOperator = user?.role === "OPERATOR";
 
   return (
@@ -66,7 +67,13 @@ function Requests() {
         />
       ) : (
         <>
-          <RequestList requests={data.items} showPeople={!isOperator} />
+          {/* The previous results stay visible while new ones load; dim them so they don't read as current. */}
+          <div
+            aria-busy={isPlaceholderData}
+            className={isPlaceholderData ? "opacity-50 transition-opacity" : "transition-opacity"}
+          >
+            <RequestList requests={data.items} showPeople={!isOperator} />
+          </div>
           <Pagination
             page={data.meta.page}
             totalPages={data.meta.totalPages}
