@@ -74,7 +74,7 @@ export default function DashboardPage() {
           ) : active.data.items.length === 0 ? (
             <EmptyState icon={Inbox} title="Nothing in the queue" hint="New requests appear here instantly." />
           ) : (
-            <RequestList requests={active.data.items} showPeople />
+            <RequestList requests={active.data.items} showPeople compact />
           )}
         </section>
         <aside className="min-w-0">

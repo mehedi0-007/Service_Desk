@@ -24,10 +24,13 @@ import { StatusBadge } from "./status-badge";
 export function RequestList({
   requests,
   showPeople = false,
+  compact = false,
 }: {
   requests: RequestDto[];
   /** Supervisors also see who created and who is assigned. */
   showPeople?: boolean;
+  /** Fewer columns, for narrow panels such as the dashboard. */
+  compact?: boolean;
 }) {
   const router = useRouter();
   // Rows that just received a live update are briefly highlighted.
@@ -47,10 +50,10 @@ export function RequestList({
               <TableHead>Status</TableHead>
               <TableHead>Progress</TableHead>
               <TableHead>Priority</TableHead>
-              <TableHead>Category</TableHead>
+              {!compact && <TableHead>Category</TableHead>}
               {showPeople && <TableHead>Created by</TableHead>}
-              {showPeople && <TableHead>Assigned to</TableHead>}
-              <TableHead>Created</TableHead>
+              {showPeople && !compact && <TableHead>Assigned to</TableHead>}
+              {!compact && <TableHead>Created</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -79,16 +82,18 @@ export function RequestList({
                 <TableCell>
                   <PriorityBadge priority={request.priority} />
                 </TableCell>
-                <TableCell>{CATEGORY_LABELS[request.category]}</TableCell>
+                {!compact && <TableCell>{CATEGORY_LABELS[request.category]}</TableCell>}
                 {showPeople && <TableCell>{request.createdBy.name}</TableCell>}
-                {showPeople && (
+                {showPeople && !compact && (
                   <TableCell className="text-muted-foreground">
                     {request.assignedTo?.name ?? "—"}
                   </TableCell>
                 )}
-                <TableCell className="text-muted-foreground">
-                  {formatDateTime(request.createdAt)}
-                </TableCell>
+                {!compact && (
+                  <TableCell className="text-muted-foreground">
+                    {formatDateTime(request.createdAt)}
+                  </TableCell>
+                )}
               </TableRow>
             ))}
           </TableBody>
