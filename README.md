@@ -5,7 +5,29 @@ Operators submit service requests. Each request is queued and processed in the b
 - **Operator:** submits requests, follows their own requests live, cancels them while they are queued or running.
 - **Supervisor:** sees all requests on a live dashboard, cancels and retries them, changes priority, assigns them to a supervisor.
 
-Analysis and design documents: [`docs/analysis.md`](docs/analysis.md) · [`docs/design.md`](docs/design.md)
+## Where to find each deliverable
+
+| Assignment deliverable | Location |
+|---|---|
+| **1. System analysis** | [`docs/analysis.md`](docs/analysis.md) |
+| Problem statement, business objectives, users | [§1 Problem statement](docs/analysis.md#1-problem-statement) · [§2 Business objectives](docs/analysis.md#2-business-objectives) · [§3 Users and stakeholders](docs/analysis.md#3-users-and-stakeholders) |
+| Assumptions and scope | [§4 Assumptions](docs/analysis.md#4-assumptions) · [§5 Scope](docs/analysis.md#5-scope) |
+| Functional requirements | [§6 Functional requirements](docs/analysis.md#6-functional-requirements) (FR-01 to FR-20) · [§6.1 Request lifecycle (state diagram)](docs/analysis.md#61-request-lifecycle) · [§6.2 Use cases per actor](docs/analysis.md#62-use-cases-per-actor) |
+| Non-functional requirements, with justification | [§7 Non-functional requirements](docs/analysis.md#7-non-functional-requirements) |
+| **2. System design** | [`docs/design.md`](docs/design.md) |
+| High-level architecture diagram | [§1 High-level architecture](docs/design.md#1-high-level-architecture) |
+| Component diagram | [§2 Component design](docs/design.md#2-component-design) · [§3 Layered architecture](docs/design.md#3-layered-architecture) |
+| Database design (ERD) | [§4 Database design](docs/design.md#4-database-design): ER diagram, constraints, indexes |
+| API design | [§5 API design](docs/design.md#5-api-design): conventions, endpoints, validation, examples |
+| WebSocket communication flow | [§6 WebSocket communication](docs/design.md#6-websocket-communication): [processing sequence](docs/design.md#61-request-processing-flow), [cancel sequence](docs/design.md#62-cancel-while-in-progress) |
+| Concurrency model | [§7 Concurrency model](docs/design.md#7-concurrency-model): [job lifecycle diagram](docs/design.md#72-job-lifecycle), [race conditions and mitigations](docs/design.md#73-race-conditions-and-mitigations) |
+| Technology stack justification | [§8 Technology stack justification](docs/design.md#8-technology-stack-justification) |
+| Security and deployment (extra) | [§9 Security design](docs/design.md#9-security-design) · [§10 Deployment view](docs/design.md#10-deployment-view) |
+| **3. Implementation** | [`backend/`](backend) (NestJS API, workers, WebSockets) · [`frontend/`](frontend) (Next.js web app) · tests in [`backend/test`](backend/test) and `backend/src/**/*.spec.ts` |
+| **4. README** | This file: [setup](#getting-started), [architecture](#architecture-overview), [technology stack](#technology-stack), [assumptions](#assumptions), [build and run](#getting-started), [API](#api-documentation), [WebSocket events](#websocket-events), [database setup](#database-setup) |
+| Git history | Conventional Commits; the analysis and design documents were committed before the first line of application code |
+
+All 8 diagrams are written in Mermaid, so GitHub renders them in place: the request lifecycle (state diagram), high-level architecture, components, ER diagram, two sequence diagrams, the job lifecycle and the deployment view.
 
 ## Live demo
 
