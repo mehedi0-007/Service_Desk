@@ -159,8 +159,8 @@ const SAMPLE_REQUESTS: SampleRequest[] = [
 
 export type SeedResult = { users: number; requestsCreated: number };
 
-// Idempotent: users are upserted; sample requests are only inserted into an empty table.
-export async function seed(prisma: PrismaClient): Promise<SeedResult> {
+/** Upserts the demo users and returns them in declaration order. */
+export async function seedUsers(prisma: PrismaClient) {
   const passwordHash = await hash(DEMO_PASSWORD, 10);
   const users = [];
   for (const user of USERS) {
@@ -172,6 +172,12 @@ export async function seed(prisma: PrismaClient): Promise<SeedResult> {
       }),
     );
   }
+  return users;
+}
+
+// Idempotent: users are upserted; sample requests are only inserted into an empty table.
+export async function seed(prisma: PrismaClient): Promise<SeedResult> {
+  const users = await seedUsers(prisma);
 
   if ((await prisma.serviceRequest.count()) > 0) {
     return { users: users.length, requestsCreated: 0 };
