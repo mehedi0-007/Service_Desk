@@ -1,9 +1,20 @@
 {
   "moduleFileExtensions": ["js", "json", "ts"],
-  "rootDir": ".",
+  "rootDir": "..",
   "testEnvironment": "node",
-  "testRegex": ".e2e-spec.ts$",
+  "testRegex": "test/.*\\.e2e-spec\\.ts$",
   "transform": {
     "^.+\\.(t|j)s$": "ts-jest"
-  }
+  },
+  "testTimeout": 30000,
+  "globalSetup": "<rootDir>/test/global-setup.ts",
+  "collectCoverageFrom": [
+    "src/**/*.ts",
+    "!src/main.ts",
+    "!src/**/*.module.ts",
+    "!src/**/dto/**",
+    "!src/**/*.spec.ts",
+    "!src/prisma/seed-data.ts"
+  ],
+  "coverageDirectory": "<rootDir>/coverage/e2e"
 }
