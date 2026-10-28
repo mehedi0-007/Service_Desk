@@ -62,6 +62,7 @@ The API runs on Render's free tier. It sleeps after 15 minutes without traffic, 
   - Optimistic locking returns `409` when two people edit the same request.
 - **Security:**
   - JWT authentication and role-based access control, enforced in REST and in WebSocket rooms.
+  - Login gives the same error and takes the same time for unknown emails and wrong passwords, so accounts cannot be enumerated.
   - Operators cannot see other operators' requests; those requests return `404`.
   - Rate limiting (login 5/min/IP), Helmet headers, a CORS allow-list and an origin check on WebSocket upgrades.
 - **Operations:**
@@ -169,6 +170,7 @@ cd backend
 docker compose up -d                    # PostgreSQL :5432 + Redis :6379
 cp .env.example .env
 npm ci
+npx prisma generate                     # recent npm versions skip dependency install scripts
 npx prisma migrate deploy && npm run db:seed
 npm run start:dev                       # API on http://localhost:3001, Swagger on /docs
 
@@ -333,6 +335,7 @@ The race-condition table and the scaling path are in [`docs/design.md` §7](docs
 
 ```bash
 cd backend
+npm run typecheck        # TypeScript across src and test
 npm test                 # unit tests
 npm run test:cov         # unit tests with coverage
 npm run test:e2e         # end-to-end tests: needs the Docker PostgreSQL + Redis (uses servicedesk_test and Redis DB 1)
@@ -341,7 +344,7 @@ npm run test:e2e:cov     # end-to-end tests with coverage
 
 | Suite | Tests | What it proves |
 |---|---|---|
-| Unit | 122 | State machine (every allowed and rejected transition); service rules (enqueue after commit, visibility, version conflicts, cancel and retry); processor (lost claim, 12 progress ticks, cancel mid-run, failure, unexpected errors never leave a request in progress) |
+| Unit | 129 | State machine (every allowed and rejected transition); service rules (enqueue after commit, visibility, version conflicts, cancel and retry); processor (lost claim, 12 progress ticks, cancel mid-run, failure, unexpected errors never leave a request in progress); statistics cache (a change during a rebuild never caches stale numbers); login (same work for unknown emails) |
 | End-to-end | 20 | Real app, database, queue and sockets: auth and roles; operator isolation; search, filters and paging limits; cancel/retry with versions; two simultaneous edits → one `200`, one `409`; **at most `WORKER_CONCURRENCY` jobs in progress at once**; API stays responsive while jobs run; cancel stops a running job; WebSocket delivery to supervisors and the owner only |
 
 **Coverage:**
@@ -414,6 +417,8 @@ The backend runs as a Docker web service on Render, with Render PostgreSQL and R
 ## Known limitations
 
 - A request created while Redis is unreachable stays `QUEUED` until the next API start, when recovery enqueues it. A periodic sweep would remove this window.
+- A WebSocket connection is authenticated when it connects; it stays open after its token expires (8 h) until the next reconnect, which checks the token again.
+- `npm audit` still reports issues that need major upgrades (Prisma 7, Next 16, zod 4, Swagger 12). They affect build tooling or client-side form validation, not request handling; the one in the request path (`multer`) is patched through an override.
 - The rate limiter identifies clients by `X-Forwarded-For` (`trust proxy` is set for Render's proxy). If the API were exposed without a proxy, clients could spoof that header to get around the limits.
 - The Render free tier sleeps after inactivity, so processing pauses while the service is asleep.
 
