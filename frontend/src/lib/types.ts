@@ -83,7 +83,12 @@ export type StatsDto = {
   generatedAt: string;
 };
 
-export type LoginResponse = { accessToken: string; user: UserDto };
+/** Returned by login and refresh; the refresh token itself only travels in an httpOnly cookie. */
+export type LoginResponse = { accessToken: string; expiresIn: number; user: UserDto };
+
+export type ChangePasswordInput = { currentPassword: string; newPassword: string };
+
+export type SessionRevokeReason = "LOGOUT" | "LOGOUT_ALL" | "PASSWORD_CHANGED" | "TOKEN_REUSE";
 
 export type ApiErrorBody = {
   statusCode: number;

@@ -2,7 +2,8 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { useAuthStore } from "@/stores/auth-store";
+import { refreshSession, watchOtherTabs } from "@/lib/session";
+import { hadSession, useAuthStore } from "@/stores/auth-store";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
@@ -15,8 +16,12 @@ export function Providers({ children }: { children: React.ReactNode }) {
       }),
   );
 
+  // The access token lives in memory, so a page load starts by exchanging the refresh cookie,
+  // unless this browser has no session to restore.
   useEffect(() => {
-    void useAuthStore.persist.rehydrate();
+    if (hadSession()) void refreshSession();
+    else useAuthStore.getState().clear();
+    return watchOtherTabs();
   }, []);
 
   return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;

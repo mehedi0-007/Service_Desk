@@ -10,6 +10,28 @@ export const loginSchema = z.object({
 });
 export type LoginValues = z.infer<typeof loginSchema>;
 
+// Same rules as the backend's ChangePasswordDto; bcrypt uses at most 72 bytes.
+export const changePasswordSchema = z
+  .object({
+    currentPassword: z.string().min(1, "Enter your current password"),
+    newPassword: z
+      .string()
+      .min(8, "Use at least 8 characters")
+      .max(72, "Use at most 72 characters")
+      .regex(/[A-Za-z]/, "Include at least one letter")
+      .regex(/\d/, "Include at least one digit"),
+    confirmPassword: z.string().min(1, "Repeat the new password"),
+  })
+  .refine((values) => values.confirmPassword === values.newPassword, {
+    path: ["confirmPassword"],
+    message: "The passwords do not match",
+  })
+  .refine((values) => values.newPassword !== values.currentPassword, {
+    path: ["newPassword"],
+    message: "Choose a password different from the current one",
+  });
+export type ChangePasswordValues = z.infer<typeof changePasswordSchema>;
+
 // Same limits as the backend's CreateRequestDto.
 export const createRequestSchema = z.object({
   title: z

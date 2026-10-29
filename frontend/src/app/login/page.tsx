@@ -17,9 +17,10 @@ import { FieldError } from "@/components/ui/field-error";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { ApiError, login } from "@/lib/api";
+import { ApiError } from "@/lib/api";
 import { ROLE_LABELS } from "@/lib/format";
 import { loginSchema, type LoginValues } from "@/lib/schemas";
+import { signIn } from "@/lib/session";
 import type { Role, UserDto } from "@/lib/types";
 import { useAuthStore } from "@/stores/auth-store";
 
@@ -36,7 +37,8 @@ const homeFor = (user: UserDto) =>
 
 export default function LoginPage() {
   const router = useRouter();
-  const { hasHydrated, user, setSession } = useAuthStore();
+  const status = useAuthStore((s) => s.status);
+  const user = useAuthStore((s) => s.user);
   const [serverError, setServerError] = useState<string | null>(null);
   const {
     register,
@@ -48,17 +50,16 @@ export default function LoginPage() {
     defaultValues: { email: "", password: "" },
   });
 
-  // Already signed in: skip the form.
+  // Signed in (here, by the refresh cookie on load, or in another tab): leave the form.
   useEffect(() => {
-    if (hasHydrated && user) router.replace(homeFor(user));
-  }, [hasHydrated, user, router]);
+    if (status === "authenticated" && user) router.replace(homeFor(user));
+  }, [status, user, router]);
 
   const onSubmit = async (values: LoginValues) => {
     setServerError(null);
     try {
-      const session = await login(values.email, values.password);
-      setSession(session.accessToken, session.user);
-      router.replace(homeFor(session.user));
+      // The effect above redirects once the session is stored.
+      await signIn(values.email, values.password);
     } catch (error) {
       setServerError(
         error instanceof ApiError ? error.message : "Something went wrong. Try again.",
