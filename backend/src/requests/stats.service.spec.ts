@@ -15,7 +15,7 @@ const COUNTS: RequestCounts = {
 };
 
 describe('StatsService', () => {
-  let cache: jest.Mocked<Pick<Cache, 'get' | 'set' | 'del'>>;
+  let cache: jest.Mocked<Pick<Cache, 'get' | 'set' | 'del' | 'disconnect'>>;
   let repository: jest.Mocked<Pick<RequestsRepository, 'stats'>>;
   let queue: jest.Mocked<Pick<RequestQueueService, 'getCounts'>>;
   let service: StatsService;
@@ -29,6 +29,7 @@ describe('StatsService', () => {
       get: jest.fn().mockResolvedValue(undefined),
       set: jest.fn().mockResolvedValue(undefined),
       del: jest.fn().mockResolvedValue(true),
+      disconnect: jest.fn().mockResolvedValue(undefined),
     };
     repository = { stats: jest.fn().mockResolvedValue(COUNTS) };
     queue = {
@@ -99,6 +100,21 @@ describe('StatsService', () => {
       active: null,
       workerConcurrency: 4,
     });
+    expect(cache.set).not.toHaveBeenCalled();
+  });
+
+  it('stops using Redis once the application shuts down', async () => {
+    await service.onModuleDestroy();
+    // Closes a connection the cache store may have reopened after its own shutdown.
+    expect(cache.disconnect).toHaveBeenCalled();
+
+    // A job that finishes during shutdown must not reconnect the cache.
+    await service.invalidate();
+    const stats = await service.getStats();
+
+    expect(stats.total).toBe(7);
+    expect(cache.del).not.toHaveBeenCalled();
+    expect(cache.get).not.toHaveBeenCalled();
     expect(cache.set).not.toHaveBeenCalled();
   });
 });

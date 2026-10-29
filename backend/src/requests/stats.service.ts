@@ -1,5 +1,5 @@
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { RequestPriority, RequestStatus } from '@prisma/client';
 import type { Cache } from 'cache-manager';
@@ -17,13 +17,19 @@ const zeroCounts = <K extends string>(keys: K[]): Record<K, number> =>
 
 /** Cache-aside: served from Redis until a request is created or changes. */
 @Injectable()
-export class StatsService {
+export class StatsService implements OnModuleDestroy {
   private readonly logger = new Logger(StatsService.name);
   /**
    * Bumped on every invalidation. A build that started before a change must not write its
    * (older) numbers back into the cache after the change deleted the key.
    */
   private generation = 0;
+  /**
+   * Set when the application shuts down. Nest closes global modules (the cache) before the
+   * processing module, so a job that finishes meanwhile would make the cache store reconnect
+   * and keep the process alive.
+   */
+  private closing = false;
 
   constructor(
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
@@ -32,7 +38,16 @@ export class StatsService {
     @Inject(appConfig.KEY) private readonly config: AppConfig,
   ) {}
 
+  async onModuleDestroy(): Promise<void> {
+    this.closing = true;
+    // Closes a connection reopened since the cache module shut down.
+    await this.cache.disconnect().catch(() => undefined);
+  }
+
   async getStats(): Promise<StatsDto> {
+    if (this.closing) {
+      return this.build();
+    }
     // Captured before any await, so a change during the cache read also counts.
     const generation = this.generation;
     const cached = await this.cache.get<StatsDto>(STATS_KEY);
@@ -56,6 +71,9 @@ export class StatsService {
   @OnEvent(RequestEvents.Updated)
   async invalidate(): Promise<void> {
     this.generation++;
+    if (this.closing) {
+      return;
+    }
     try {
       await this.cache.del(STATS_KEY);
     } catch (error) {
