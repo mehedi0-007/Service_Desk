@@ -33,11 +33,13 @@ All 9 diagrams are written in Mermaid, so GitHub renders them in place: the requ
 
 | | URL |
 |---|---|
-| Web app | _Vercel URL_ |
-| API | _Render URL_`/api/v1` |
-| Swagger UI | _Render URL_`/docs` |
+| Web app | https://service-desk-ebon-pi.vercel.app |
+| API | https://service-desk-api-bsww.onrender.com/api/v1 (health: [`/api/v1/health`](https://service-desk-api-bsww.onrender.com/api/v1/health)) |
+| Swagger UI | https://service-desk-api-bsww.onrender.com/docs |
 
 The API runs on Render's free tier. It sleeps after 15 minutes without traffic, so the first request can take about a minute; after that it responds immediately.
+
+Use Chrome, Edge or Firefox in a normal window. Safari and private windows block the cross-site session cookie: everything works, but a page reload asks you to sign in again (see [Known limitations](#known-limitations)).
 
 **Demo accounts** (password for all: `Password123!`). The login page lists them; click one to fill the form.
 
@@ -377,7 +379,7 @@ npm run test:e2e:cov     # end-to-end tests with coverage
 
 | Suite | Tests | What it proves |
 |---|---|---|
-| Unit | 164 | State machine (every allowed and rejected transition); service rules (enqueue after commit, visibility, version conflicts, cancel and retry); processor (lost claim, 12 progress ticks, cancel mid-run, failure, unexpected errors never leave a request in progress); statistics cache (a change during a rebuild never caches stale numbers; no Redis use once shutdown starts); login (same work for unknown emails); sessions (only hashes stored, rotation, maximum age, reuse inside and after the grace period, parallel refresh); password change; revoked sessions rejected; CSRF origin check |
+| Unit | 171 | State machine (every allowed and rejected transition); service rules (enqueue after commit, visibility, version conflicts, cancel and retry); processor (lost claim, 12 progress ticks, cancel mid-run, failure, unexpected errors never leave a request in progress); statistics cache (a change during a rebuild never caches stale numbers; no Redis use once shutdown starts); login (same work for unknown emails); sessions (only hashes stored, rotation, maximum age, reuse inside and after the grace period, parallel refresh); password change; revoked sessions rejected; CSRF origin check |
 | End-to-end | 34 | Real app, database, queue and sockets: auth and roles; operator isolation; search, filters and paging limits; cancel/retry with versions; two simultaneous edits → one `200`, one `409`; **at most `WORKER_CONCURRENCY` jobs in progress at once**; API stays responsive while jobs run; cancel stops a running job; WebSocket delivery to supervisors and the owner only; refresh cookie attributes, rotation and reuse detection; logout rejects the access token at once (with or without the cookie); sign out everywhere; password change; foreign origins refused; sockets closed on logout and on token expiry |
 
 **Coverage:**
