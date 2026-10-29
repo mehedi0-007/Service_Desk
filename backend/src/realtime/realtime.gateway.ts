@@ -44,6 +44,10 @@ export class RealtimeGateway
 
   async handleConnection(socket: Socket): Promise<void> {
     const authenticated = await this.authenticate(socket);
+    // The client may have left while the token was checked; handleDisconnect has already run.
+    if (socket.disconnected) {
+      return;
+    }
     if (!authenticated) {
       socket.emit('error', { code: 'UNAUTHORIZED' });
       socket.disconnect(true);
@@ -54,10 +58,11 @@ export class RealtimeGateway
     const data = socket.data as SocketData;
     data.user = user;
     // Disconnect when the access token expires; the client reconnects with a refreshed one.
+    // unref: a pending expiry must not keep the process alive during shutdown.
     data.expiryTimer = setTimeout(
       () => socket.disconnect(true),
       Math.min(Math.max(expiresAt - Date.now(), 0), MAX_TIMER_MS),
-    );
+    ).unref();
     await socket.join([userRoom(user.id), sessionRoom(user.sessionId)]);
     if (user.role === Role.SUPERVISOR) {
       await socket.join(SUPERVISORS_ROOM);
