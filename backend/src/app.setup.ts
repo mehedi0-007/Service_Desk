@@ -4,6 +4,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { Logger } from 'nestjs-pino';
+import { REFRESH_COOKIE } from './auth/refresh-cookie';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { validationExceptionFactory } from './common/validation/validation-exception.factory';
 import { AppConfig, appConfig } from './config/app.config';
@@ -51,6 +52,12 @@ export function configureApp(app: NestExpressApplication): AppConfig {
       )
       .setVersion('1.0')
       .addBearerAuth()
+      // The refresh, logout and login routes use the httpOnly refresh cookie.
+      .addCookieAuth(
+        REFRESH_COOKIE,
+        { type: 'apiKey', in: 'cookie', name: REFRESH_COOKIE },
+        REFRESH_COOKIE,
+      )
       .build(),
   );
   SwaggerModule.setup('docs', app, document);

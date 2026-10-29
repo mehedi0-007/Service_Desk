@@ -78,4 +78,24 @@ describe('Auth (e2e)', () => {
       expect(res.body).toMatchObject({ code: 'FORBIDDEN' });
     }
   });
+
+  it('declares every security scheme its API documentation refers to', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/docs-json')
+      .expect(200);
+    const spec = res.body as {
+      paths: Record<string, Record<string, { security?: object[] }>>;
+      components: { securitySchemes?: Record<string, unknown> };
+    };
+
+    const used = new Set(
+      Object.values(spec.paths)
+        .flatMap((operations) => Object.values(operations))
+        .flatMap((operation) => operation.security ?? [])
+        .flatMap((requirement) => Object.keys(requirement)),
+    );
+    expect([...used].sort()).toEqual(
+      Object.keys(spec.components.securitySchemes ?? {}).sort(),
+    );
+  });
 });
