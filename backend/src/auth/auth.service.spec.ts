@@ -202,6 +202,26 @@ describe('AuthService', () => {
       expect(sessions.revoke).not.toHaveBeenCalled();
     });
 
+    it("also ends the access token's session, in case the cookie was already rotated", async () => {
+      // Another tab may have rotated the cookie a moment ago: the outdated cookie matches no
+      // session, so only the access token still identifies the one to end.
+      jwt.verifyAsync.mockResolvedValue({ sub: user.id, sid: 'session-id' });
+
+      await service.logout({
+        refreshToken: 'outdated-token',
+        accessToken: 'access-token',
+      });
+
+      expect(sessions.revokeByToken).toHaveBeenCalledWith(
+        'outdated-token',
+        SessionRevokeReason.LOGOUT,
+      );
+      expect(sessions.revoke).toHaveBeenCalledWith(
+        'session-id',
+        SessionRevokeReason.LOGOUT,
+      );
+    });
+
     it('falls back to the access token when the browser sent no cookie', async () => {
       jwt.verifyAsync.mockResolvedValue({ sub: user.id, sid: 'session-id' });
 

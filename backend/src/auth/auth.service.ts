@@ -71,20 +71,18 @@ export class AuthService {
   }
 
   /**
-   * Ends the current session. The refresh cookie identifies it; browsers that block the
-   * cross-site cookie send no cookie, so a valid access token identifies it instead.
+   * Ends the current session, identified by the refresh cookie and by the access token. Both are
+   * used: browsers that block the cross-site cookie send none, and a cookie that another tab
+   * rotated a moment ago no longer matches the session.
    */
   async logout(tokens: {
     refreshToken?: string;
     accessToken?: string;
   }): Promise<void> {
-    if (tokens.refreshToken) {
-      await this.sessions.revokeByToken(
-        tokens.refreshToken,
-        SessionRevokeReason.LOGOUT,
-      );
-      return;
-    }
+    await this.sessions.revokeByToken(
+      tokens.refreshToken,
+      SessionRevokeReason.LOGOUT,
+    );
     if (!tokens.accessToken) {
       return;
     }
