@@ -1,9 +1,13 @@
+import { JwtService } from '@nestjs/jwt';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { io, Socket } from 'socket.io-client';
+import request from 'supertest';
+import type { JwtPayload } from '../src/auth/jwt.strategy';
 import { RequestDto } from '../src/requests/dto/request.response';
 import {
   createRequest,
   createTestApp,
+  login,
   loginAs,
   OPERATOR,
   OPERATOR_2,
@@ -102,5 +106,49 @@ describe('Realtime (e2e)', () => {
     );
 
     expect(other.received.filter(isMine)).toEqual([]);
+  });
+
+  it('disconnects the sockets of a session that logs out, and only those', async () => {
+    const leaving = await login(app, SUPERVISOR);
+    const staying = await login(app, SUPERVISOR);
+    const a = await connect(leaving.accessToken);
+    const b = await connect(staying.accessToken);
+
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/logout')
+      .set('Cookie', leaving.cookie)
+      .expect(204);
+
+    await waitFor(() => Promise.resolve(a.socket.disconnected));
+    expect(a.received).toContainEqual({
+      event: 'session.revoked',
+      payload: { reason: 'LOGOUT' },
+    });
+    expect(b.socket.connected).toBe(true);
+
+    // A revoked session cannot connect again with its still-unexpired access token.
+    const retry = await connect(leaving.accessToken);
+    await waitFor(() => Promise.resolve(retry.socket.disconnected));
+    expect(retry.received).toContainEqual({
+      event: 'error',
+      payload: { code: 'UNAUTHORIZED' },
+    });
+  });
+
+  it('closes a socket when its access token expires', async () => {
+    const { accessToken } = await login(app, OPERATOR);
+    const jwt = app.get(JwtService);
+    const { sub, role, sid } = jwt.decode<JwtPayload>(accessToken);
+    const shortLived = await jwt.signAsync(
+      { sub, role, sid },
+      { expiresIn: 2 },
+    );
+
+    const { socket } = await connect(shortLived);
+    expect(socket.connected).toBe(true);
+
+    await waitFor(() => Promise.resolve(socket.disconnected), {
+      timeout: 5000,
+    });
   });
 });

@@ -5,6 +5,8 @@ export enum ErrorCode {
   BAD_REQUEST = 'BAD_REQUEST',
   UNAUTHORIZED = 'UNAUTHORIZED',
   INVALID_CREDENTIALS = 'INVALID_CREDENTIALS',
+  SESSION_EXPIRED = 'SESSION_EXPIRED',
+  REFRESH_CONFLICT = 'REFRESH_CONFLICT',
   FORBIDDEN = 'FORBIDDEN',
   NOT_FOUND = 'NOT_FOUND',
   INVALID_TRANSITION = 'INVALID_TRANSITION',
@@ -40,6 +42,29 @@ export const invalidTransition = (from: string, to: string): AppException =>
     ErrorCode.INVALID_TRANSITION,
     `Cannot change status from ${from} to ${to}`,
     HttpStatus.CONFLICT,
+  );
+
+export const sessionExpired = (): AppException =>
+  new AppException(
+    ErrorCode.SESSION_EXPIRED,
+    'Your session has ended. Please sign in again.',
+    HttpStatus.UNAUTHORIZED,
+  );
+
+export const refreshConflict = (): AppException =>
+  new AppException(
+    ErrorCode.REFRESH_CONFLICT,
+    'The session was renewed by another request. Try again.',
+    HttpStatus.CONFLICT,
+  );
+
+/** A validation error on one field, in the same shape as the validation pipe's errors. */
+export const fieldError = (field: string, message: string): AppException =>
+  new AppException(
+    ErrorCode.VALIDATION_ERROR,
+    'Validation failed',
+    HttpStatus.BAD_REQUEST,
+    [{ field, messages: [message] }],
   );
 
 export const versionConflict = (): AppException =>

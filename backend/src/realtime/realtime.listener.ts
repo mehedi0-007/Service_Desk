@@ -1,5 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
+import { SessionEvents } from '../auth/session-events';
+import type { SessionsRevokedEvent } from '../auth/session-events';
 import { RequestDto } from '../requests/dto/request.response';
 import { RequestEvents } from '../requests/request-events';
 import type {
@@ -36,6 +38,15 @@ export class RealtimeListener {
     // The audience is for routing only; clients receive the progress delta.
     const { audience, ...payload } = event;
     this.send(RequestEvents.Progress, payload, audience);
+  }
+
+  @OnEvent(SessionEvents.Revoked)
+  onSessionsRevoked({ sessionIds, reason }: SessionsRevokedEvent): void {
+    try {
+      this.gateway.disconnectSessions(sessionIds, reason);
+    } catch (error) {
+      this.logger.warn(`Could not close revoked sessions: ${String(error)}`);
+    }
   }
 
   private send(

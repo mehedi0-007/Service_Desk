@@ -12,7 +12,13 @@ export const envValidationSchema = Joi.object({
     .uri({ scheme: ['redis', 'rediss'] })
     .required(),
   JWT_SECRET: Joi.string().min(32).required(),
-  JWT_EXPIRES_IN: Joi.string().default('8h'),
+  ACCESS_TOKEN_TTL_SECONDS: Joi.number().integer().min(10).default(900),
+  REFRESH_TOKEN_TTL_DAYS: Joi.number().integer().min(1).default(7),
+  SESSION_MAX_AGE_DAYS: Joi.number()
+    .integer()
+    .min(Joi.ref('REFRESH_TOKEN_TTL_DAYS'))
+    .default(30),
+  REFRESH_REUSE_GRACE_SECONDS: Joi.number().integer().min(0).default(30),
   CORS_ORIGIN: Joi.string().required(),
   WORKER_CONCURRENCY: Joi.number().integer().min(1).max(32).default(4),
   JOB_STAGE_MIN_MS: Joi.number().integer().min(0).default(2000),

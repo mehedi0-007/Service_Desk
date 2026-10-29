@@ -16,6 +16,10 @@ export class UsersService {
     return this.prisma.user.findUnique({ where: { email } });
   }
 
+  async updatePassword(id: string, passwordHash: string): Promise<void> {
+    await this.prisma.user.update({ where: { id }, data: { passwordHash } });
+  }
+
   async list(role?: Role): Promise<UserDto[]> {
     const users = await this.prisma.user.findMany({
       where: role ? { role } : undefined,

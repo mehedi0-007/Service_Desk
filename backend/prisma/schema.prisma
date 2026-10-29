@@ -41,6 +41,13 @@ enum ProcessingStage {
   FINALIZING
 }
 
+enum SessionRevokeReason {
+  LOGOUT
+  LOGOUT_ALL
+  PASSWORD_CHANGED
+  TOKEN_REUSE
+}
+
 model User {
   id           String   @id @default(uuid()) @db.Uuid
   email        String   @unique @db.VarChar(254)
@@ -52,6 +59,7 @@ model User {
   createdRequests  ServiceRequest[]       @relation("CreatedRequests")
   assignedRequests ServiceRequest[]       @relation("AssignedRequests")
   statusChanges    RequestStatusHistory[]
+  sessions         Session[]
 
   @@map("users")
 }
@@ -106,4 +114,27 @@ model RequestStatusHistory {
 
   @@index([requestId, createdAt])
   @@map("request_status_history")
+}
+
+/// One signed-in device. Only hashes of refresh tokens are stored, never the tokens.
+model Session {
+  id                String               @id @default(uuid()) @db.Uuid
+  userId            String               @map("user_id") @db.Uuid
+  refreshTokenHash  String               @unique @map("refresh_token_hash") @db.Char(64)
+  /// The token replaced by the last rotation; presenting it again means it was copied.
+  previousTokenHash String?              @map("previous_token_hash") @db.Char(64)
+  rotatedAt         DateTime?            @map("rotated_at")
+  /// Sliding: renewed on every refresh, but never past created_at + the maximum session age.
+  expiresAt         DateTime             @map("expires_at")
+  revokedAt         DateTime?            @map("revoked_at")
+  revokedReason     SessionRevokeReason? @map("revoked_reason")
+  userAgent         String?              @map("user_agent") @db.VarChar(255)
+  createdAt         DateTime             @default(now()) @map("created_at")
+  lastUsedAt        DateTime             @default(now()) @map("last_used_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([previousTokenHash])
+  @@map("sessions")
 }

@@ -20,6 +20,7 @@ const owner: AuthenticatedUser = {
   email: 'owner@demo.test',
   name: 'Olivia Operator',
   role: Role.OPERATOR,
+  sessionId: 'owner-session',
 };
 const otherOperator: AuthenticatedUser = {
   ...owner,
@@ -31,6 +32,7 @@ const supervisor: AuthenticatedUser = {
   email: 'supervisor@demo.test',
   name: 'Sam Supervisor',
   role: Role.SUPERVISOR,
+  sessionId: 'supervisor-session',
 };
 
 function row(overrides: Partial<RequestRow> = {}): RequestRow {

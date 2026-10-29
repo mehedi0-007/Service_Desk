@@ -1,6 +1,7 @@
 import { getQueueToken } from '@nestjs/bullmq';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
+import { hash } from 'bcryptjs';
 import { Queue } from 'bullmq';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
@@ -48,15 +49,69 @@ export async function resetData(app: NestExpressApplication): Promise<void> {
 export const queueOf = (app: NestExpressApplication): Queue =>
   app.get<Queue>(getQueueToken(REQUEST_QUEUE), { strict: false });
 
+let clients = 0;
+
+/**
+ * A new client address per call. Login and password changes are limited to 5 per minute per IP;
+ * the app trusts X-Forwarded-For (it runs behind a proxy), so each test login counts separately.
+ */
+export const clientIp = (): string => {
+  clients++;
+  return `10.0.${clients >> 8}.${clients & 255}`;
+};
+
 export async function loginAs(
   app: NestExpressApplication,
   email: string,
 ): Promise<string> {
+  return (await login(app, email)).accessToken;
+}
+
+export const REFRESH_COOKIE = 'sd_refresh';
+
+export type Login = { accessToken: string; cookie: string };
+
+/** Logs in and returns the access token with the refresh cookie (`name=value`). */
+export async function login(
+  app: NestExpressApplication,
+  email: string,
+  password = PASSWORD,
+): Promise<Login> {
   const res = await request(app.getHttpServer())
     .post('/api/v1/auth/login')
-    .send({ email, password: PASSWORD })
+    .set('X-Forwarded-For', clientIp())
+    .send({ email, password })
     .expect(200);
-  return (res.body as { accessToken: string }).accessToken;
+  return {
+    accessToken: (res.body as { accessToken: string }).accessToken,
+    cookie: refreshCookieOf(res),
+  };
+}
+
+/** The refresh cookie set by a response, as `name=value` for a Cookie header. */
+export function refreshCookieOf(res: request.Response): string {
+  const header = res.headers['set-cookie'] as unknown as string[] | undefined;
+  const cookie = header?.find((c) => c.startsWith(`${REFRESH_COOKIE}=`));
+  if (!cookie) {
+    throw new Error('The response did not set the refresh cookie');
+  }
+  return cookie.split(';')[0];
+}
+
+/** Creates an operator of its own, so tests that change passwords leave the seeded users alone. */
+export async function createUser(
+  app: NestExpressApplication,
+  email: string,
+  password = PASSWORD,
+): Promise<void> {
+  await app.get(PrismaService).user.create({
+    data: {
+      email,
+      name: 'Test Operator',
+      role: 'OPERATOR',
+      passwordHash: await hash(password, 10),
+    },
+  });
 }
 
 export async function createRequest(

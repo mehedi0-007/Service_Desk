@@ -14,7 +14,12 @@ export const appConfig = registerAs('app', () => {
     redisUrl: env.REDIS_URL as string,
     jwt: {
       secret: env.JWT_SECRET as string,
-      expiresIn: env.JWT_EXPIRES_IN as string,
+      accessTokenTtlSeconds: Number(env.ACCESS_TOKEN_TTL_SECONDS),
+    },
+    session: {
+      refreshTtlDays: Number(env.REFRESH_TOKEN_TTL_DAYS),
+      maxAgeDays: Number(env.SESSION_MAX_AGE_DAYS),
+      reuseGraceSeconds: Number(env.REFRESH_REUSE_GRACE_SECONDS),
     },
     worker: {
       concurrency: Number(env.WORKER_CONCURRENCY),

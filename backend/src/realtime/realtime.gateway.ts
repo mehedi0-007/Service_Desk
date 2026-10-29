@@ -6,20 +6,27 @@ import {
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
-import { Role } from '@prisma/client';
+import { Role, SessionRevokeReason } from '@prisma/client';
 import type { Server, Socket } from 'socket.io';
 import type { JwtPayload } from '../auth/jwt.strategy';
+import { SessionsService } from '../auth/sessions.service';
 import type { RequestAudience } from '../requests/request-events';
-import { UsersService } from '../users/users.service';
 
-type SocketUser = { id: string; role: Role };
+type SocketUser = { id: string; role: Role; sessionId: string };
+type SocketData = { user?: SocketUser; expiryTimer?: NodeJS.Timeout };
 
 export const SUPERVISORS_ROOM = `role:${Role.SUPERVISOR}`;
 export const userRoom = (userId: string): string => `user:${userId}`;
+export const sessionRoom = (sessionId: string): string =>
+  `session:${sessionId}`;
+
+// setTimeout fires immediately for delays above 2^31 - 1 ms (about 24.8 days).
+const MAX_TIMER_MS = 2 ** 31 - 1;
 
 /**
  * Server-to-client push channel. Clients authenticate with their JWT during the handshake and
- * are placed in rooms; rooms decide who receives which request events.
+ * are placed in rooms; rooms decide who receives which request events. A socket lives no longer
+ * than its access token and its session: the client reconnects with a fresh token.
  */
 @WebSocketGateway({ namespace: '/realtime' })
 export class RealtimeGateway
@@ -32,19 +39,26 @@ export class RealtimeGateway
 
   constructor(
     private readonly jwt: JwtService,
-    private readonly users: UsersService,
+    private readonly sessions: SessionsService,
   ) {}
 
   async handleConnection(socket: Socket): Promise<void> {
-    const user = await this.authenticate(socket);
-    if (!user) {
+    const authenticated = await this.authenticate(socket);
+    if (!authenticated) {
       socket.emit('error', { code: 'UNAUTHORIZED' });
       socket.disconnect(true);
       return;
     }
 
-    (socket.data as { user?: SocketUser }).user = user;
-    await socket.join(userRoom(user.id));
+    const { user, expiresAt } = authenticated;
+    const data = socket.data as SocketData;
+    data.user = user;
+    // Disconnect when the access token expires; the client reconnects with a refreshed one.
+    data.expiryTimer = setTimeout(
+      () => socket.disconnect(true),
+      Math.min(Math.max(expiresAt - Date.now(), 0), MAX_TIMER_MS),
+    );
+    await socket.join([userRoom(user.id), sessionRoom(user.sessionId)]);
     if (user.role === Role.SUPERVISOR) {
       await socket.join(SUPERVISORS_ROOM);
     }
@@ -52,7 +66,8 @@ export class RealtimeGateway
   }
 
   handleDisconnect(socket: Socket): void {
-    const user = (socket.data as { user?: SocketUser }).user;
+    const { user, expiryTimer } = socket.data as SocketData;
+    clearTimeout(expiryTimer);
     this.logger.debug(
       `Socket ${socket.id} disconnected${user ? ` for user ${user.id}` : ''}`,
     );
@@ -74,7 +89,16 @@ export class RealtimeGateway
     this.server.to(rooms).emit(event, payload);
   }
 
-  private async authenticate(socket: Socket): Promise<SocketUser | null> {
+  /** Tells the sockets of revoked sessions why, then closes them. */
+  disconnectSessions(sessionIds: string[], reason: SessionRevokeReason): void {
+    const rooms = sessionIds.map(sessionRoom);
+    this.server.to(rooms).emit('session.revoked', { reason });
+    this.server.in(rooms).disconnectSockets(true);
+  }
+
+  private async authenticate(
+    socket: Socket,
+  ): Promise<{ user: SocketUser; expiresAt: number } | null> {
     const auth = socket.handshake.auth as { token?: unknown } | undefined;
     const header = socket.handshake.headers.authorization;
     const token =
@@ -85,11 +109,25 @@ export class RealtimeGateway
       return null;
     }
     try {
-      const payload = await this.jwt.verifyAsync<JwtPayload>(token, {
-        algorithms: ['HS256'],
-      });
-      const user = await this.users.findById(payload.sub);
-      return user ? { id: user.id, role: user.role } : null;
+      const payload = await this.jwt.verifyAsync<JwtPayload & { exp: number }>(
+        token,
+        { algorithms: ['HS256'] },
+      );
+      if (!payload.sid) {
+        return null;
+      }
+      const session = await this.sessions.findActive(payload.sid);
+      if (!session || session.userId !== payload.sub) {
+        return null;
+      }
+      return {
+        user: {
+          id: session.user.id,
+          role: session.user.role,
+          sessionId: session.id,
+        },
+        expiresAt: payload.exp * 1000,
+      };
     } catch {
       return null;
     }
