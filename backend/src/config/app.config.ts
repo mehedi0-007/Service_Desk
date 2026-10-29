@@ -29,7 +29,8 @@ export const appConfig = registerAs('app', () => {
     },
     statsCacheTtlSeconds: Number(env.STATS_CACHE_TTL_SECONDS),
     logLevel: env.LOG_LEVEL as string,
-    seedOnStart: env.SEED_ON_START === 'true',
+    // Joi accepts "true" in any letter case, so compare the same way.
+    seedOnStart: env.SEED_ON_START?.toLowerCase() === 'true',
   };
 });
 
