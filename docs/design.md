@@ -533,7 +533,7 @@ Additional ordering rule: the database change is **committed before** a job is e
 | UI components | **shadcn/ui + Tailwind CSS** | Accessible components (built on Radix primitives) copied into the repo, so they are owned code rather than a runtime dependency; consistent look without custom design work | Material UI — heavier runtime library and harder to restyle |
 | Forms | **react-hook-form + zod** | Declarative validation mirroring the backend rules; server validation errors mapped to fields | Manual validation |
 | Packaging | **Docker / Docker Compose** | Identical environments for development and deployment; one command to start PostgreSQL and Redis | Local installs — inconsistent across machines |
-| Hosting | **Render** (API, PostgreSQL, Redis) + **Vercel** (frontend) | Render runs a long-lived container, needed for WebSockets and background workers; Vercel is the natural host for Next.js | Serverless-only hosting — cannot keep WebSocket connections or run workers |
+| Hosting | **Render** (API, Redis) + **Neon** (PostgreSQL) + **Vercel** (frontend) | Render runs a long-lived container, needed for WebSockets and background workers; Vercel is the natural host for Next.js | Serverless-only hosting — cannot keep WebSocket connections or run workers |
 
 ## 9. Security Design
 
@@ -626,15 +626,18 @@ flowchart LR
 
     subgraph Render
         API["Web service (Docker): NestJS API + BullMQ workers"]
-        PG[("Render PostgreSQL")]
         KV[("Render Key Value (Redis, noeviction)")]
+    end
+
+    subgraph Neon
+        PG[("PostgreSQL")]
     end
 
     User -- "HTTPS" --> FE
     User -- "HTTPS REST + WSS Socket.IO" --> API
-    API --> PG
+    API -- "TLS" --> PG
     API --> KV
 ```
 
-- **Production.** The frontend is served by Vercel. The API runs as a Docker container on Render; on start it applies pending database migrations and then serves REST, WebSockets and the worker pool. PostgreSQL and Redis are managed Render services on the same private network. Redis uses the `noeviction` policy because BullMQ stores jobs as keys that must never be evicted.
+- **Production.** The frontend is served by Vercel. The API runs as a Docker container on Render; on start it applies pending database migrations and then serves REST, WebSockets and the worker pool. Redis is a managed Render service on the same private network. PostgreSQL is a managed Neon database in the same region, reached over TLS; it was chosen over Render's free PostgreSQL, which is deleted after 30 days. Redis uses the `noeviction` policy because BullMQ stores jobs as keys that must never be evicted.
 - **Local development.** `backend/docker-compose.yml` starts PostgreSQL and Redis (and optionally the API); the frontend has its own Dockerfile and Compose file. Each folder can also run directly with Node.js.

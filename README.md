@@ -407,18 +407,19 @@ All numbers are measured locally against PostgreSQL and Redis in Docker.
 
 ## Deployment
 
-The backend runs as a Docker web service on Render, with Render PostgreSQL and Render Key Value (Redis). The frontend runs on Vercel.
+The backend runs as a Docker web service on Render with Render Key Value (Redis); PostgreSQL runs on Neon. The frontend runs on Vercel. Use the same region for all three (for example Singapore).
 
 1. **Render Key Value (Redis):** create an instance with maximum memory policy **`noeviction`** (BullMQ stores jobs as keys). Copy its *internal* URL.
-2. **Render PostgreSQL:** create a database and copy its *internal* URL. The free instance expires after 30 days.
+2. **Neon (PostgreSQL):** create a project in the same region and copy the **direct** connection string (host without `-pooler`; Prisma migrations need a direct connection), keeping `?sslmode=require`. Neon was chosen over Render's free PostgreSQL, which is deleted after 30 days.
 3. **Render Web Service:** connect the repository.
    - Settings: Root Directory **`backend`**, runtime **Docker**, health check path **`/api/v1/health`**.
    - Environment variables:
-     - `DATABASE_URL` and `REDIS_URL`: the internal URLs from steps 1 and 2.
-     - `JWT_SECRET`: a long random string.
+     - `DATABASE_URL`: the Neon connection string from step 2.
+     - `REDIS_URL`: the internal URL from step 1.
+     - `JWT_SECRET`: a long random string (at least 32 characters).
      - `NODE_ENV=production` and `SEED_ON_START=true`.
-     - `CORS_ORIGIN`: set this after step 4.
-   - Render injects `PORT`. On every start the container applies pending migrations and seeds an empty database.
+     - `CORS_ORIGIN`: required at start-up; use `http://localhost:3000` until the Vercel URL is known (step 5).
+   - Render injects `PORT`. On every start the container applies pending migrations (`prisma migrate deploy`) and seeds the demo users; sample requests are added only to an empty database.
 4. **Vercel:** import the repository.
    - Settings: Root Directory **`frontend`**, framework Next.js.
    - Environment variables: `NEXT_PUBLIC_API_URL=https://<api>.onrender.com/api/v1` and `NEXT_PUBLIC_WS_URL=https://<api>.onrender.com`.
