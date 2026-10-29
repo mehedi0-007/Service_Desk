@@ -27,7 +27,7 @@ Operators submit service requests. Each request is queued and processed in the b
 | **4. README** | This file: [setup](#getting-started), [architecture](#architecture-overview), [technology stack](#technology-stack), [assumptions](#assumptions), [build and run](#getting-started), [API](#api-documentation), [WebSocket events](#websocket-events), [database setup](#database-setup) |
 | Git history | Conventional Commits; the analysis and design documents were committed before the first line of application code |
 
-All 8 diagrams are written in Mermaid, so GitHub renders them in place: the request lifecycle (state diagram), high-level architecture, components, ER diagram, two sequence diagrams, the job lifecycle and the deployment view.
+All 9 diagrams are written in Mermaid, so GitHub renders them in place: the request lifecycle (state diagram), high-level architecture, components, ER diagram, three sequence diagrams (processing, cancel, session lifecycle), the job lifecycle and the deployment view.
 
 ## Live demo
 
@@ -84,6 +84,8 @@ The API runs on Render's free tier. It sleeps after 15 minutes without traffic, 
   - Optimistic locking returns `409` when two people edit the same request.
 - **Security:**
   - JWT authentication and role-based access control, enforced in REST and in WebSocket rooms.
+  - Sessions: a 15-minute access token kept in memory and a rotating refresh token in an httpOnly cookie. Reusing an old refresh token revokes the session.
+  - Logging out ends the session on the server at once, including its open WebSocket connections. Users can also sign out of all devices and change their password (which signs out their other devices).
   - Login gives the same error and takes the same time for unknown emails and wrong passwords, so accounts cannot be enumerated.
   - Operators cannot see other operators' requests; those requests return `404`.
   - Rate limiting (login 5/min/IP), Helmet headers, a CORS allow-list and an origin check on WebSocket upgrades.
@@ -154,7 +156,7 @@ The repository root holds only `backend/`, `frontend/`, `docs/` and this README.
 backend/
   prisma/                 schema, migrations, seed script
   src/
-    auth/                 login, JWT strategy, guards, roles
+    auth/                 login, sessions and refresh tokens, JWT strategy, password change
     users/                users and supervisor list
     requests/             controller, service, repository, state machine, DTOs, stats, domain events
     processing/           BullMQ queue, worker (processor), startup recovery
@@ -215,7 +217,10 @@ All variables are validated at startup; the app refuses to start with an invalid
 | `DATABASE_URL` | `postgresql://servicedesk:servicedesk@localhost:5432/servicedesk?schema=public` | PostgreSQL connection |
 | `REDIS_URL` | `redis://localhost:6379` | Redis for the queue and the cache (`rediss://` for TLS) |
 | `JWT_SECRET` | at least 32 characters | Signs access tokens |
-| `JWT_EXPIRES_IN` | `8h` | Token lifetime |
+| `ACCESS_TOKEN_TTL_SECONDS` | `900` | Access token lifetime |
+| `REFRESH_TOKEN_TTL_DAYS` | `7` | A session ends after this many days without use |
+| `SESSION_MAX_AGE_DAYS` | `30` | A session ends this many days after login, used or not |
+| `REFRESH_REUSE_GRACE_SECONDS` | `30` | A replaced refresh token presented again after this long revokes the session (shorter means two tabs refreshing at once is a race, not theft) |
 | `CORS_ORIGIN` | `http://localhost:3000` | Comma-separated allowed browser origins (REST and WebSocket) |
 | `WORKER_CONCURRENCY` | `4` | Jobs processed at the same time (1–32) |
 | `JOB_STAGE_MIN_MS` / `JOB_STAGE_MAX_MS` | `2000` / `5000` | Duration range of each of the 3 stages |
@@ -250,12 +255,16 @@ All variables are validated at startup; the app refuses to start with an invalid
 
 ## API documentation
 
-Interactive documentation: **Swagger UI at `/docs`** (for example http://localhost:3001/docs). Base path `/api/v1`; send `Authorization: Bearer <token>` on every endpoint except login and health.
+Interactive documentation: **Swagger UI at `/docs`** (for example http://localhost:3001/docs). Base path `/api/v1`; send `Authorization: Bearer <token>` on every endpoint except health and the cookie endpoints (`login`, `refresh`, `logout`). The refresh token is only ever sent in the `sd_refresh` cookie (`HttpOnly`, `Path=/api/v1/auth`); browsers must call those endpoints with `credentials: "include"`.
 
 | Method | Path | Roles | Description |
 |---|---|---|---|
 | `GET` | `/health` | public | Database and Redis status (`503` if either is down) |
-| `POST` | `/auth/login` | public (5/min/IP) | `{ email, password }` → `{ accessToken, user }` |
+| `POST` | `/auth/login` | public (5/min/IP) | `{ email, password }` → `{ accessToken, expiresIn, user }` and sets the refresh cookie |
+| `POST` | `/auth/refresh` | refresh cookie | New access token; the cookie is rotated. `401 SESSION_EXPIRED` when the session has ended, `409 REFRESH_CONFLICT` when a parallel refresh won (retry once) |
+| `POST` | `/auth/logout` | refresh cookie or access token | Ends this session → `204`, clears the cookie |
+| `POST` | `/auth/logout-all` | any | Ends all of the user's sessions → `204` |
+| `PATCH` | `/auth/password` | any (5/min/IP) | `{ currentPassword, newPassword }` → `204`; other sessions are signed out |
 | `GET` | `/auth/me` | any | Current user |
 | `GET` | `/users?role=SUPERVISOR` | Supervisor | Users, e.g. for the assignee list |
 | `POST` | `/requests` | Operator | Create → `201`, status `QUEUED` |
@@ -320,10 +329,11 @@ socket.on("request.updated", ({ request }) => { /* … */ });
 ```
 
 - **Authentication:**
-  - The JWT is checked during the handshake. A missing or invalid token gets `error { code: "UNAUTHORIZED" }` and is disconnected.
+  - The JWT and its session are checked during the handshake. A missing or invalid token gets `error { code: "UNAUTHORIZED" }` and is disconnected.
+  - A socket is closed when its access token expires; the client reconnects with a fresh one (pass `auth` as a function so every handshake reads the current token).
   - Browser origins outside `CORS_ORIGIN` are refused, because browsers do not apply CORS to WebSocket upgrades.
 - **Rooms:**
-  - Every socket joins `user:{id}`; supervisors also join `role:SUPERVISOR`.
+  - Every socket joins `user:{id}` and `session:{id}`; supervisors also join `role:SUPERVISOR`.
   - Each event goes to `role:SUPERVISOR`, the owner and the assignee in a single emit, so other operators never receive it.
 - **Ordering:** events are emitted only after the database transaction commits.
 
@@ -332,6 +342,7 @@ socket.on("request.updated", ({ request }) => { /* … */ });
 | `request.created` | `{ request: RequestDto }` | A request was submitted |
 | `request.updated` | `{ request: RequestDto }` | Any status, priority or assignment change, by a user or the worker |
 | `request.progress` | `{ id, referenceNo, status, progress, stage, updatedAt }` | Every worker tick (a small delta, not the full object) |
+| `session.revoked` | `{ reason }` (`LOGOUT`, `LOGOUT_ALL`, `PASSWORD_CHANGED`, `TOKEN_REUSE`) | The socket's session was ended; the server closes the socket right after |
 
 There are no client → server events. The client updates its query cache from these events and refetches its queries after every (re)connect, so nothing is missed while it was offline.
 
@@ -366,12 +377,12 @@ npm run test:e2e:cov     # end-to-end tests with coverage
 
 | Suite | Tests | What it proves |
 |---|---|---|
-| Unit | 129 | State machine (every allowed and rejected transition); service rules (enqueue after commit, visibility, version conflicts, cancel and retry); processor (lost claim, 12 progress ticks, cancel mid-run, failure, unexpected errors never leave a request in progress); statistics cache (a change during a rebuild never caches stale numbers); login (same work for unknown emails) |
-| End-to-end | 20 | Real app, database, queue and sockets: auth and roles; operator isolation; search, filters and paging limits; cancel/retry with versions; two simultaneous edits → one `200`, one `409`; **at most `WORKER_CONCURRENCY` jobs in progress at once**; API stays responsive while jobs run; cancel stops a running job; WebSocket delivery to supervisors and the owner only |
+| Unit | 164 | State machine (every allowed and rejected transition); service rules (enqueue after commit, visibility, version conflicts, cancel and retry); processor (lost claim, 12 progress ticks, cancel mid-run, failure, unexpected errors never leave a request in progress); statistics cache (a change during a rebuild never caches stale numbers; no Redis use once shutdown starts); login (same work for unknown emails); sessions (only hashes stored, rotation, maximum age, reuse inside and after the grace period, parallel refresh); password change; revoked sessions rejected; CSRF origin check |
+| End-to-end | 34 | Real app, database, queue and sockets: auth and roles; operator isolation; search, filters and paging limits; cancel/retry with versions; two simultaneous edits → one `200`, one `409`; **at most `WORKER_CONCURRENCY` jobs in progress at once**; API stays responsive while jobs run; cancel stops a running job; WebSocket delivery to supervisors and the owner only; refresh cookie attributes, rotation and reuse detection; logout rejects the access token at once (with or without the cookie); sign out everywhere; password change; foreign origins refused; sockets closed on logout and on token expiry |
 
 **Coverage:**
-- The end-to-end suite covers **88.8 % of lines** (68 % of branches) of the backend source.
-- Unit tests cover the state machine at 100 %, the processor at 90 % and the request service at 78 %.
+- The end-to-end suite covers **88.4 % of lines** (69 % of branches) of the backend source.
+- Unit tests cover the state machine at 100 %, the processor at 90 %, the request service at 78 %, the auth service at 100 % and the session service at 96 %.
 
 **Isolation:**
 - The e2e global setup refuses any database whose name does not end in `_test`.
@@ -417,17 +428,18 @@ The backend runs as a Docker web service on Render, with Render PostgreSQL and R
 ## Assumptions
 
 1. Requests are processed automatically on submission. The "long-running operation" is a simulated three-stage job, 6–15 s in total by default, with a configurable random failure rate.
-2. There are two roles (Operator, Supervisor) and the users are seeded. There is no self-registration or password reset.
+2. There are two roles (Operator, Supervisor) and the users are seeded. There is no self-registration or forgotten-password reset; signed-in users can change their password.
 3. Requests are assigned to supervisors, acting as the responsible owner; there is no separate technician role.
 4. Failed processing is not retried automatically: retry is a supervisor decision, which keeps the audit trail meaningful. Only infrastructure errors that stop a job before processing starts are retried by the queue, up to 3 times with backoff.
 5. A request in progress can be cancelled; the worker stops at its next progress tick, at most about 1.25 s later.
-6. JWT access tokens last 8 h, with no refresh tokens, which is acceptable for an internal tool of this scope.
+6. Access tokens last 15 minutes; the refresh token keeps a session alive for 7 days without use, and at most 30 days after login.
 7. A single API instance runs on the free cloud tier; the design documents how to scale horizontally.
 8. All timestamps are stored in UTC and displayed in local time.
 
 ## Design decisions and trade-offs
 
-- **Bearer token in `localStorage`:** the frontend (Vercel) and the API (Render) are on different domains, where cross-site cookies are fragile. The trade-off is XSS exposure, mitigated by React's escaping and no `dangerouslySetInnerHTML`. The UI hides buttons for convenience, but the API enforces every rule.
+- **Access token in memory, refresh token in an httpOnly cookie:** scripts can never read the long-lived credential, and nothing is kept in `localStorage`. The frontend (Vercel) and the API (Render) are on different sites, so the cookie is cross-site (`SameSite=None; Secure`); the cookie endpoints accept only the frontend's origins to block cross-site request forgery. The UI hides buttons for convenience, but the API enforces every rule.
+- **Sessions in the database:** the access token names its session, and the lookup that loads the user also checks the session, so a logout takes effect immediately without an extra query.
 - **Workers inside the API process:** this is simple and enough for I/O-bound simulated work. The queue is in Redis, so workers can move to a separate service without code changes.
 - **Database as the source of truth:** BullMQ job state is never trusted on its own. Guarded writes and startup recovery make the system correct even if jobs are duplicated, lost or late.
 - **No automatic retry of failed requests:** it keeps failures visible and the history honest; supervisors decide.
@@ -439,7 +451,7 @@ The backend runs as a Docker web service on Render, with Render PostgreSQL and R
 ## Known limitations
 
 - A request created while Redis is unreachable stays `QUEUED` until the next API start, when recovery enqueues it. A periodic sweep would remove this window.
-- A WebSocket connection is authenticated when it connects; it stays open after its token expires (8 h) until the next reconnect, which checks the token again.
+- The refresh cookie is a third-party cookie, because the frontend and the API are on different sites. Browsers that block those (Safari, Chrome private windows, Brave) cannot renew a session: signing in works, but a reload or an expired access token sends the user back to the login page. Serving the API under the frontend's domain (a rewrite proxy or a shared parent domain) would make the cookie first-party.
 - `npm audit` still reports issues that need major upgrades (Prisma 7, Next 16, zod 4, Swagger 12). They affect build tooling or client-side form validation, not request handling; the one in the request path (`multer`) is patched through an override.
 - The rate limiter identifies clients by `X-Forwarded-For` (`trust proxy` is set for Render's proxy). If the API were exposed without a proxy, clients could spoof that header to get around the limits.
 - The Render free tier sleeps after inactivity, so processing pauses while the service is asleep.
@@ -447,7 +459,8 @@ The backend runs as a Docker web service on Render, with Render PostgreSQL and R
 ## Possible improvements
 
 - A CI/CD pipeline (lint, unit and e2e tests, image build, deploy on merge).
-- Refresh tokens and httpOnly cookies on a shared parent domain.
+- Serve the API under the frontend's domain, so the refresh cookie is first-party and works in every browser.
+- A list of active sessions (device, last used) with sign-out per device.
 - `@socket.io/redis-adapter` and a separate worker deployment for horizontal scaling.
 - A periodic sweep that enqueues stranded `QUEUED` requests without waiting for a restart.
 - Frontend component and end-to-end tests (Playwright).
