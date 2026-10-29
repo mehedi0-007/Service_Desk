@@ -33,20 +33,21 @@ while long-running processing happens in the background without slowing the appl
 ## 4. Assumptions
 
 1. Requests are processed automatically on submission; the "long-running operation" is a simulated 3-stage job (6–15 s total by default) with a configurable random failure rate.
-2. Two roles only (Operator, Supervisor); users are seeded — no self-registration or password reset.
+2. Two roles only (Operator, Supervisor); users are seeded — no self-registration or forgotten-password reset. Signed-in users can change their own password.
 3. Assignment is to supervisors (acting as the responsible owner); there is no separate technician role.
 4. Failed processing is not retried automatically; retry is a supervisor decision (keeps the audit trail meaningful). Only infrastructure errors that stop a job before it starts processing (for example, a brief database outage) are retried by the queue, up to 3 attempts with backoff.
 5. A request in progress can be cancelled; the worker stops at its next progress tick (≤ ~1.25 s).
-6. JWT access tokens (8 h), no refresh tokens — acceptable for an internal tool and this scope.
+6. A session uses a short-lived JWT access token (15 min) and a rotating refresh token in an httpOnly cookie, valid for 7 days of inactivity and at most 30 days after login. Logging out revokes the session on the server immediately.
 7. Single API instance on the free cloud tier; the design documents how to scale horizontally.
 8. The emphasis is on backend robustness; the web UI is intentionally functional rather than heavily styled.
 9. All timestamps are stored in UTC; the UI displays local time.
+10. The frontend and API run on different sites (Vercel, Render), so the refresh cookie is a cross-site cookie. Browsers that block third-party cookies (Safari by default, Chrome private windows, Brave) cannot renew a session silently; there, users sign in again after a reload or when the access token expires.
 
 ## 5. Scope
 
 **In scope**
 
-- Authentication with email/password and two roles (Operator, Supervisor)
+- Authentication with email/password and two roles (Operator, Supervisor); refresh-token sessions, server-side logout (this device or all devices) and password change
 - Request submission, listing, details, status history, search, filtering, sorting and pagination
 - Background processing with a configurable number of concurrent workers and live progress
 - Cancel, retry, priority change and assignment, with conflict detection
@@ -58,13 +59,13 @@ while long-running processing happens in the background without slowing the appl
 
 **Out of scope**
 
-Self-registration, password reset, email/SMS notifications, file attachments, SLA timers, multi-tenancy, CI/CD pipeline, native mobile apps, internationalisation.
+Self-registration, forgotten-password reset (needs email delivery), email/SMS notifications, file attachments, SLA timers, multi-tenancy, CI/CD pipeline, native mobile apps, internationalisation.
 
 ## 6. Functional Requirements
 
 | ID | Requirement | Actor | Priority |
 |---|---|---|---|
-| FR-01 | Users log in with email and password and receive an access token | Operator, Supervisor | Must |
+| FR-01 | Users log in with email and password and receive a short-lived access token and a refresh session | Operator, Supervisor | Must |
 | FR-02 | The system enforces role-based permissions (Operator, Supervisor) | System | Must |
 | FR-03 | An operator creates a service request with title, description, category and priority | Operator | Must |
 | FR-04 | A new request is queued and processed automatically in the background | System | Must |
@@ -84,6 +85,9 @@ Self-registration, password reset, email/SMS notifications, file attachments, SL
 | FR-18 | Concurrent conflicting edits are detected and rejected with a clear message | System | Must |
 | FR-19 | The UI shows the real-time connection state and resynchronises after reconnecting | Operator, Supervisor | Should |
 | FR-20 | The system exposes a health endpoint for operations | Administrator | Should |
+| FR-21 | Sessions renew silently while in use and end after 7 days of inactivity or 30 days after login | Operator, Supervisor | Should |
+| FR-22 | Users log out of the current device or of all devices; a logged-out session stops working immediately, including open WebSocket connections | Operator, Supervisor | Should |
+| FR-23 | Users change their own password by confirming the current one; their other devices are signed out | Operator, Supervisor | Should |
 
 **Mapping to the requirement examples in the brief:** create → FR-03 · view → FR-05, FR-07, FR-08 · **update request status → FR-04 (automatic transitions by the worker) + FR-11, FR-12 (cancel, retry) + FR-13 (priority, assignment)** · monitor progress → FR-10, FR-14 · receive live updates → FR-09 · cancel → FR-11 · search and filter → FR-06.
 
@@ -123,6 +127,7 @@ Any other transition is rejected. Every transition is written to the audit trail
 - Browse, search and filter own requests (FR-05, FR-06)
 - Follow a request's progress and history live (FR-07, FR-08, FR-09, FR-10)
 - Cancel an own request that is still queued or running (FR-11)
+- Change own password; sign out of this device or of all devices (FR-21, FR-22, FR-23)
 
 **Supervisor**
 - Log in (FR-01)
@@ -130,6 +135,7 @@ Any other transition is rejected. Every transition is written to the audit trail
 - Browse, search and filter all requests (FR-05, FR-06)
 - Inspect any request's progress and history (FR-07, FR-08, FR-10)
 - Cancel, retry, reprioritise or assign requests (FR-11, FR-12, FR-13, FR-18)
+- Change own password; sign out of this device or of all devices (FR-21, FR-22, FR-23)
 
 **System**
 - Process queued requests concurrently (FR-04, FR-15)
@@ -147,9 +153,9 @@ Any other transition is rejected. Every transition is written to the audit trail
 | NFR-01 | Performance | API p95 < 300 ms for reads and writes while all workers are busy; list pages ≤ 100 items | Operators and supervisors work interactively; slow responses break the "real-time" experience | Processing runs in background workers; B-tree indexes on filter columns and trigram indexes for text search; page size capped at 100 |
 | NFR-02 | Responsiveness | A status or progress change appears in connected browsers within 1 s | Core business objective BO-1 | Server push over Socket.IO immediately after each database commit; no polling |
 | NFR-03 | Concurrency | N (default 4, configurable) requests processed in parallel; long-running work never blocks HTTP handling | Brief requires concurrent processing; volume grows with the organisation | BullMQ worker with configurable concurrency; the API returns as soon as a request is stored and queued |
-| NFR-04 | Scalability | Stateless API and queue-based workers; a documented path to more instances | The organisation is growing | JWT authentication (no server sessions); jobs in Redis can be consumed by additional worker processes; Socket.IO Redis adapter as the documented next step |
+| NFR-04 | Scalability | Stateless API and queue-based workers; a documented path to more instances | The organisation is growing | Short-lived JWT access tokens, with the session checked in the same query that loads the user (no extra round trip); jobs in Redis can be consumed by additional worker processes; Socket.IO Redis adapter as the documented next step |
 | NFR-05 | Reliability | No lost or overwritten updates; no request is lost after a restart; in-progress work is recovered; graceful shutdown | Requests represent customer work and must never silently disappear | Atomic conditional database writes and optimistic locking; PostgreSQL is the source of truth for every request; Redis `noeviction` (plus append-only persistence in the Docker setup); startup recovery re-queues interrupted requests and re-enqueues queued requests whose job is missing, so a Redis restart without persistence loses no work; shutdown hooks wait for active jobs |
-| NFR-06 | Security | Hashed passwords, token authentication, role-based access, input whitelisting, rate limiting, security headers, CORS allow-list, no secrets in the repository, no data leakage between operators | Requests contain customer information | bcrypt, JWT, global auth and role guards, validation pipe with whitelist, throttling (stricter on login), Helmet, CORS from configuration, operators receive 404 for others' requests and only their own WebSocket events |
+| NFR-06 | Security | Hashed passwords, token authentication with revocable sessions, role-based access, input whitelisting, rate limiting, security headers, CORS allow-list, no secrets in the repository, no data leakage between operators | Requests contain customer information | bcrypt, short-lived JWT plus rotating refresh tokens stored only as hashes (reuse revokes the session), httpOnly cookie with an Origin check on the cookie endpoints, global auth and role guards, validation pipe with whitelist, throttling (stricter on login), Helmet, CORS from configuration, operators receive 404 for others' requests and only their own WebSocket events |
 | NFR-07 | Maintainability | Modular layered architecture, typed DTOs, versioned migrations, lint and formatting, automated tests | The system must be extended and handed over | NestJS modules with controller → service → repository layers; Prisma migrations; ESLint and Prettier; unit and end-to-end tests |
 | NFR-08 | Availability | Health endpoint checking dependencies; containers with healthchecks and restart policy | Problems must be detected and recovered quickly | `/api/v1/health` checks PostgreSQL and Redis; Docker healthchecks; restart policies; platform health checks on the host |
 | NFR-09 | Usability | Clear status indicators, progress bars, inline form errors, feedback for every action | Users need to understand state at a glance | Colour-coded status badges, live progress bars, field-level validation messages, toast notifications |

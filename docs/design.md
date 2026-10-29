@@ -126,6 +126,7 @@ erDiagram
     users |o--o{ service_requests : "is assigned"
     service_requests ||--o{ request_status_history : "has history"
     users |o--o{ request_status_history : "changes status"
+    users ||--o{ sessions : "signs in"
 
     users {
         uuid id PK
@@ -167,6 +168,20 @@ erDiagram
         uuid changed_by_id FK
         timestamp created_at
     }
+
+    sessions {
+        uuid id PK
+        uuid user_id FK
+        char refresh_token_hash UK
+        char previous_token_hash
+        timestamp rotated_at
+        timestamp expires_at
+        timestamp revoked_at
+        varchar revoked_reason
+        varchar user_agent
+        timestamp created_at
+        timestamp last_used_at
+    }
 ```
 
 **Enums:** `Role` (OPERATOR, SUPERVISOR) · `RequestStatus` (QUEUED, IN_PROGRESS, COMPLETED, FAILED, CANCELLED) · `RequestPriority` (LOW, MEDIUM, HIGH, URGENT) · `RequestCategory` (HARDWARE, SOFTWARE, NETWORK, ACCESS, OTHER) · `ProcessingStage` (VALIDATING, PROCESSING, FINALIZING).
@@ -186,6 +201,8 @@ erDiagram
 | service_requests | CHECK `length(trim(title)) >= 3` | Defends the title rule at database level too |
 | request_status_history | FK `request_id → service_requests.id` ON DELETE CASCADE | History lives and dies with its request |
 | request_status_history | FK `changed_by_id → users.id` ON DELETE SET NULL | `NULL` means the change was made by the system |
+| sessions | UNIQUE `refresh_token_hash` | A refresh token identifies exactly one session |
+| sessions | FK `user_id → users.id` ON DELETE CASCADE | Removing a user ends their sessions |
 | all | PostgreSQL enums for role, status, priority, category, stage | Invalid values are impossible |
 
 ### 4.2 Indexes
@@ -200,12 +217,15 @@ erDiagram
 | `service_requests(title)` | GIN trigram (`pg_trgm`) | Fast case-insensitive "contains" search on title |
 | `service_requests(description)` | GIN trigram (`pg_trgm`) | Fast case-insensitive "contains" search on description |
 | `request_status_history(request_id, created_at)` | B-tree | Timeline of one request in order |
+| `sessions(user_id)` | B-tree | Sign out of all devices; end other sessions after a password change |
+| `sessions(previous_token_hash)` | B-tree | Detects reuse of an already rotated refresh token |
 
 ### 4.3 Key Design Decisions
 
 - **`version` (optimistic locking).** Incremented on every status, priority or assignment change, but **not** on progress ticks. Clients send the version they last saw; if it no longer matches, the change is rejected with `409 VERSION_CONFLICT` instead of silently overwriting someone else's edit. Progress ticks do not bump it, otherwise a user could never act on a request while a worker is running.
 - **`request_status_history` (audit trail).** One row per transition with old and new status, actor and note, written in the **same transaction** as the status change, so the current status and its history can never disagree.
 - **Progress stored on the request row.** The latest progress and stage are always readable via REST, so a client that (re)connects gets the correct state without replaying events.
+- **`sessions` (one row per signed-in device).** Stores the SHA-256 hash of the current refresh token (never the token itself) and of the previous one, for reuse detection. The access token carries the session id, and the per-request user lookup loads the session together with its user, so a logout takes effect at once without an extra query. Revoked rows are kept as a record of sign-ins.
 - **CHECK constraints, the `pg_trgm` extension and the trigram indexes** are kept together in one hand-written SQL migration. Prisma's schema language cannot express CHECK constraints, and keeping the search setup next to them makes the database rules easy to review in one place.
 
 ## 5. API Design
@@ -216,7 +236,7 @@ erDiagram
 |---|---|
 | Base path and versioning | `/api/v1` (URI versioning) |
 | Format | JSON request and response bodies; ISO-8601 UTC timestamps |
-| Authentication | `Authorization: Bearer <JWT>` on every endpoint except `POST /auth/login` and `GET /health` |
+| Authentication | `Authorization: Bearer <JWT>` (15 min access token) on every endpoint except `GET /health` and the cookie endpoints `POST /auth/login`, `/auth/refresh` and `/auth/logout`. The refresh token travels only in the `sd_refresh` cookie: `HttpOnly; Secure; SameSite=None; Path=/api/v1/auth` (`SameSite=Lax` without `Secure` in local development) |
 | Documentation | OpenAPI / Swagger UI at `/docs` |
 | Pagination | `?page=1&pageSize=20` (max 100) → `{ items, meta: { page, pageSize, total, totalPages } }` |
 | Correlation | Every response carries `x-request-id`; the same id appears in server logs and error bodies |
@@ -236,14 +256,18 @@ erDiagram
 }
 ```
 
-Error codes: `VALIDATION_ERROR` (400, `details` lists `{ field, messages[] }`), `BAD_REQUEST` (400), `UNAUTHORIZED` (401), `INVALID_CREDENTIALS` (401), `FORBIDDEN` (403), `NOT_FOUND` (404), `INVALID_TRANSITION` (409), `VERSION_CONFLICT` (409), `CONFLICT` (409), `RATE_LIMITED` (429), `SERVICE_UNAVAILABLE` (503, health check only; `details` names the failing dependency), `INTERNAL_ERROR` (500 — never exposes internal details).
+Error codes: `VALIDATION_ERROR` (400, `details` lists `{ field, messages[] }`), `BAD_REQUEST` (400), `UNAUTHORIZED` (401), `INVALID_CREDENTIALS` (401), `SESSION_EXPIRED` (401, refresh token missing, expired, revoked or reused), `REFRESH_CONFLICT` (409, the refresh token was rotated by a parallel request a moment ago; retry once), `FORBIDDEN` (403), `NOT_FOUND` (404), `INVALID_TRANSITION` (409), `VERSION_CONFLICT` (409), `CONFLICT` (409), `RATE_LIMITED` (429), `SERVICE_UNAVAILABLE` (503, health check only; `details` names the failing dependency), `INTERNAL_ERROR` (500 — never exposes internal details).
 
 ### 5.2 Endpoints
 
 | Method | Path | Roles | Body / Query | Success |
 |---|---|---|---|---|
 | GET | `/health` | public | — | 200 `{ status: 'ok', info: { database, redis } }`; 503 if a dependency is down |
-| POST | `/auth/login` | public, 5 attempts/min per IP | `{ email, password }` | 200 `{ accessToken, user }` |
+| POST | `/auth/login` | public, 5 attempts/min per IP | `{ email, password }` | 200 `{ accessToken, expiresIn, user }` and sets the refresh cookie |
+| POST | `/auth/refresh` | refresh cookie | — | 200 `{ accessToken, expiresIn, user }` and a rotated cookie |
+| POST | `/auth/logout` | refresh cookie | — | 204; revokes this session and clears the cookie (also when the session is already gone) |
+| POST | `/auth/logout-all` | any | — | 204; revokes all of the user's sessions |
+| PATCH | `/auth/password` | any, 5 attempts/min per IP | `{ currentPassword, newPassword }` | 204; revokes the user's other sessions |
 | GET | `/auth/me` | any | — | 200 `UserDto` |
 | GET | `/users` | SUPERVISOR | `?role=SUPERVISOR\|OPERATOR` | 200 `UserDto[]` |
 | POST | `/requests` | OPERATOR | `CreateRequestDto` | 201 `RequestDto` (status `QUEUED`) |
@@ -268,6 +292,8 @@ Error codes: `VALIDATION_ERROR` (400, `details` lists `{ field, messages[] }`), 
 | ChangeStatusDto | `status` | `CANCELLED` or `QUEUED` (retry); system-only statuses are rejected |
 | | `note` | optional, ≤ 500 characters |
 | | `version` | required integer ≥ 1 |
+| ChangePasswordDto | `currentPassword` | required; must match the stored password, otherwise `400 VALIDATION_ERROR` on this field |
+| | `newPassword` | 8–72 characters (bcrypt's limit), at least one letter and one digit, different from the current password |
 | ListRequestsQuery | `q` | optional, ≤ 100 characters; matches title or description (case-insensitive), or the reference number (`42`, `SR-00042`) |
 | | `status`, `priority` | optional comma-separated lists of enum values |
 | | `category` | optional enum |
@@ -352,8 +378,8 @@ Sending the same body again (version 3 is now outdated):
 | Aspect | Design |
 |---|---|
 | Library / namespace | Socket.IO, namespace `/realtime` on the API host; same origin allow-list as REST, also checked during the handshake because browsers do not apply CORS to WebSocket upgrades |
-| Authentication | Client connects with `auth: { token: '<JWT>' }`; the server verifies it during the handshake. Invalid or missing token → server emits `error { code: 'UNAUTHORIZED' }` and disconnects |
-| Rooms | Every socket joins `user:{userId}`; supervisors also join `role:SUPERVISOR` |
+| Authentication | Client connects with `auth: { token: '<JWT>' }`; the server verifies the token and that its session is still active. Invalid or missing token → server emits `error { code: 'UNAUTHORIZED' }` and disconnects. When the access token expires the server disconnects the socket, and the client reconnects with a fresh token |
+| Rooms | Every socket joins `user:{userId}` and `session:{sessionId}`; supervisors also join `role:SUPERVISOR` |
 | Routing rule | Each request event goes to `role:SUPERVISOR` + `user:{createdById}` (+ `user:{assignedToId}` if assigned) in a single emit (Socket.IO de-duplicates sockets in several rooms) |
 | Ordering | Events are emitted only **after** the database transaction commits |
 | Direction | Server → client only; all commands go through REST |
@@ -363,6 +389,7 @@ Sending the same body again (version 3 is now outdated):
 | `request.created` | `{ request: RequestDto }` | After a request is created |
 | `request.updated` | `{ request: RequestDto }` | Any status, priority or assignment change (by worker or user) |
 | `request.progress` | `{ id, referenceNo, status, progress, stage, updatedAt }` | Every worker progress tick |
+| `session.revoked` | `{ reason }` | The socket's session was logged out, signed out everywhere or ended by a password change; the server disconnects the socket right after |
 
 ### 6.1 Request Processing Flow
 
@@ -513,18 +540,21 @@ Additional ordering rule: the database change is **committed before** a job is e
 ### 9.1 Authentication and Authorisation
 
 1. The user logs in with email and password. The password is checked against a bcrypt hash. Unknown email and wrong password return the same `401 INVALID_CREDENTIALS` (no user enumeration). Login is limited to 5 attempts per minute per IP.
-2. The API issues a signed JWT (HS256, 8 h) containing the user id and role.
-3. A **global** authentication guard protects every endpoint; only endpoints explicitly marked public (`login`, `health`) skip it (secure by default). The token's user is reloaded on each request, so a removed user loses access immediately.
+2. The API creates a **session** and returns a signed access JWT (HS256, 15 min) with the user id, role and session id. The refresh token (32 random bytes) is set as an httpOnly cookie; the database stores only its SHA-256 hash.
+3. A **global** authentication guard protects every endpoint; only endpoints explicitly marked public (`login`, `refresh`, `logout`, `health`) skip it (secure by default). Each request loads the token's session together with its user in one query, so a revoked session or a removed user loses access immediately.
 4. A role guard checks `@Roles(...)` on supervisor-only endpoints.
 5. Ownership rules are enforced in the service layer: operators only ever see their own requests (404 for others) and can only cancel their own.
-6. The WebSocket handshake verifies the same JWT; room membership ensures operators receive events only for their own requests.
+6. The WebSocket handshake verifies the same JWT and session; room membership ensures operators receive events only for their own requests.
+7. **Refresh with rotation.** Every refresh replaces the refresh token with a compare-and-set update (`WHERE refresh_token_hash = <presented hash> AND revoked_at IS NULL`), so two parallel refreshes cannot both succeed. Presenting the previous token again means it was copied: after a short grace period (30 s, for two tabs refreshing at the same moment) the whole session is revoked. Inside the grace period the server answers `409 REFRESH_CONFLICT` and the client retries with the cookie the browser now holds.
+8. **Logout** revokes the session, clears the cookie and disconnects the session's sockets. **Sign out everywhere** and a **password change** revoke the user's sessions the same way (a password change keeps the current one).
 
 ### 9.2 Permission Matrix
 
 | Endpoint | Operator | Supervisor |
 |---|---|---|
 | `POST /auth/login`, `GET /health` | ✓ (public) | ✓ (public) |
-| `GET /auth/me` | ✓ | ✓ |
+| `POST /auth/refresh`, `POST /auth/logout` | ✓ (refresh cookie) | ✓ (refresh cookie) |
+| `GET /auth/me`, `POST /auth/logout-all`, `PATCH /auth/password` | ✓ | ✓ |
 | `GET /users` | ✗ | ✓ |
 | `POST /requests` | ✓ | ✗ |
 | `GET /requests`, `GET /requests/:id`, `GET /requests/:id/history` | own only | all |
@@ -536,11 +566,20 @@ Additional ordering rule: the database change is **committed before** a job is e
 
 ### 9.3 Token Storage
 
-The frontend (Vercel) and API (Render) run on different domains, which makes cross-site cookies fragile (third-party cookie restrictions, `SameSite` rules). The access token is therefore sent as a Bearer header and kept in the browser's local storage. The trade-off is exposure to cross-site scripting; it is mitigated by React's output escaping and no use of raw HTML injection. HttpOnly cookies on a shared domain plus refresh tokens are the documented improvement.
+The access token is kept **in memory only** (lost on reload) and sent as a Bearer header. The refresh token lives in an **httpOnly cookie** that scripts cannot read, so a cross-site scripting bug cannot steal a long-lived credential; at worst it can use the 15-minute access token while the page is open. After a reload the app calls `/auth/refresh` to get a new access token.
+
+The frontend (Vercel) and API (Render) run on different sites, so the cookie is cross-site (`SameSite=None; Secure`). Two consequences:
+
+- **Cross-site request forgery.** A cross-site cookie is sent with requests from any site. The cookie endpoints therefore reject requests whose `Origin` header is neither in the CORS allow-list nor the API's own origin (Swagger UI). Browsers always send `Origin` with cross-site POST requests, and pages cannot change it. All other endpoints use the Bearer header, which browsers never attach on their own.
+- **Browsers that block third-party cookies** (Safari, Chrome private windows, Brave) do not send the cookie. Login still works, but a reload or an expired access token sends the user back to the login page. Serving the API under the frontend's domain (a rewrite proxy or a shared parent domain) would make the cookie first-party and remove this limitation.
 
 ### 9.4 Threats and Mitigations
 
-- **Brute-force login** → rate limiting (5/min/IP on login, 120/min/IP globally), bcrypt hashing.
+- **Brute-force login** → rate limiting (5/min/IP on login and password change, 120/min/IP globally), bcrypt hashing.
+- **Stolen access token** → valid for 15 minutes at most and rejected as soon as its session is revoked.
+- **Stolen refresh token** → stored only as a hash; rotated on every use; reuse of a rotated token revokes the session.
+- **Cross-site request forgery on the cookie endpoints** → `Origin` checked against the allow-list.
+- **Password change at an unattended screen** → the current password is required; other devices are signed out.
 - **Mass assignment** (client sets `status`, `createdById`, …) → DTO whitelisting rejects unknown fields.
 - **Data leakage between operators** → ownership checks in services (404), per-user WebSocket rooms.
 - **Injection** → parameterised queries through the ORM; validated and typed inputs.
@@ -548,6 +587,32 @@ The frontend (Vercel) and API (Render) run on different domains, which makes cro
 - **Cross-origin abuse** → CORS allow-list from configuration for REST and WebSockets.
 - **Common web attacks** → security headers via Helmet.
 - **Secrets in code** → all secrets come from environment variables; only `.env.example` files are committed.
+
+### 9.5 Session Lifecycle
+
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant A as API
+    participant D as PostgreSQL
+    B->>A: POST /auth/login {email, password}
+    A->>D: insert session (hash of the refresh token)
+    A-->>B: 200 {accessToken, 15 min} + Set-Cookie sd_refresh (HttpOnly)
+    B->>A: GET /requests (Bearer access token)
+    A->>D: load session and user (one query)
+    A-->>B: 200
+    Note over B,A: 15 minutes later the access token has expired
+    B->>A: GET /requests (expired token)
+    A-->>B: 401
+    B->>A: POST /auth/refresh (cookie, Origin checked)
+    A->>D: UPDATE sessions SET hash = new WHERE hash = presented AND revoked_at IS NULL
+    A-->>B: 200 {new accessToken} + rotated cookie
+    B->>A: GET /requests (retried with the new token)
+    A-->>B: 200
+    B->>A: POST /auth/logout (cookie)
+    A->>D: set revoked_at
+    A-->>B: 204, cookie cleared; the session's sockets are disconnected
+```
 
 ## 10. Deployment View
 
